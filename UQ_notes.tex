@@ -1,0 +1,186 @@
+\documentclass{article}
+\usepackage{graphicx} % Required for inserting images
+\usepackage{amsmath,amssymb}
+\usepackage{amsthm}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true, urlcolor=blue, linkcolor=blue, citecolor=red}
+\graphicspath{{Figures/}}
+\usepackage[shortlabels]{enumitem}
+%\renewcommand\thesubsection{\Alph{subsection}} % For alphabetized subsections
+
+\newcommand{\s}{\scalebox{0.75}[1.0]{$-$}}
+\newcommand{\abs}[1]{\left|#1\right|}
+\newcommand{\mf}{\mathfrak}
+\renewcommand{\b}{\mathbf}
+\newcommand{\bs}{\boldsymbol}
+\newcommand{\uv}[1]{\b{\hat{#1}}}
+\newcommand{\uvs}[1]{\bs{\hat{#1}}}
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\Q}{\mathbb{Q}}
+\newcommand{\Z}{\mathbb{Z}}
+\newcommand{\C}{\mathbb{C}}
+\renewcommand{\H}{\mathbb{H}}
+\newcommand{\Zplus}{\mathbb{Z}^+}
+
+\newcommand{\f}{\frac}
+
+\newcommand{\ket}[1]{\left| #1\right\rangle}
+\newcommand{\bra}[1]{\left\langle #1\right|}
+\newcommand{\braket}[2]{\left\langle #1\mid #2\right\rangle}
+\newcommand{\vket}[1]{| #1\rangle}
+\newcommand{\vbra}[1]{\langle #1|}
+\newcommand{\vbraket}[2]{\langle #1\mid #2\rangle}
+\newcommand{\CNOT}{\mathrm{CNOT}}
+
+\newcommand{\comp}[1]{#1^\mathsf{c}}
+\newcommand{\clos}[1]{\overline{#1}}
+\newcommand{\0}{\varnothing}
+
+\newcommand{\llangle}{\langle\langle}
+\newcommand{\rrangle}{\rangle\rangle}
+
+\theoremstyle{definition}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{corollary}{Corollary}[theorem]
+\newtheorem*{lemma}{Lemma}
+\newtheorem*{exercise}{Exercise}
+\newtheorem*{answer}{Answer}
+\newtheorem{definition}{Definition}[section]
+\newtheorem{proposition}{Proposition}[section]
+
+\newcommand{\ad}{\mathrm{ad}}
+\newcommand{\Ad}{\mathrm{Ad}}
+\renewcommand{\O}{\mathrm{O}}
+\newcommand{\SO}{\mathrm{SO}}
+\newcommand{\U}{\mathrm{U}}
+\newcommand{\SU}{\mathrm{SU}}
+\newcommand{\GL}{\mathrm{GL}}
+\newcommand{\SL}{\mathrm{SL}}
+\renewcommand{\o}{\mf{o}}
+\newcommand{\so}{\mf{so}}
+\renewcommand{\u}{\mf{u}}
+\newcommand{\su}{\mf{su}}
+\newcommand{\gl}{\mf{gl}}
+\renewcommand{\sl}{\mf{sl}}
+
+\renewcommand{\d}{\mathrm{d}}
+\newcommand{\D}{\mathrm{D}}
+\makeatletter
+\newcommand{\pd}[1]{%
+  \@ifnextchar\bgroup{\pd@twoargs{#1}}{\pd@onearg{#1}}%
+}
+\newcommand{\pd@onearg}[1]{
+  \frac{\partial}{\partial #1}
+}
+\newcommand{\pd@twoargs}[2]{
+  \frac{\partial #1}{\partial #2}
+}
+\newcommand{\dd}[1]{%
+  \@ifnextchar\bgroup{\dd@twoargs{#1}}{\dd@onearg{#1}}%
+}
+\newcommand{\dd@onearg}[1]{
+  \frac{\mathrm{d}}{\mathrm{d} #1}
+}
+\newcommand{\dd@twoargs}[2]{
+  \frac{\mathrm{d} #1}{\mathrm{d} #2}
+}
+\makeatother
+
+\title{Uncertainty Quantification Notes}
+\author{Noah Silverberg}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section{``Evidential" DL}
+
+Idea adapted from \cite{sensoy2018evidentialdeeplearningquantify}, which was UQ for classification networks.
+
+\subsection{Background/Theory}
+
+\subsubsection{Model Output and Interpretation}
+
+Let's say we want a normal distribution as our output for the brightness of a single pixel $y$, i.e.,
+$$p(y \mid x) = \mathcal{N}(y \mid \mu, \sigma^2)$$
+and we want to place a Gaussian prior over $\mu$ (we'd ideally like pixel values to be in the range $[0, 1]$, but this will be a good approximation) and an inverse gamma prior over $\sigma^2$ (we need to ensure $\sigma^2 > 0$):
+$$\mu \sim \mathcal{N}(\gamma, \sigma^2/\nu), \quad \sigma^2 \sim \Gamma^{-1}(\alpha, \beta)$$
+Then we can write the joint prior over the outputs as:
+$$p(\mu, \sigma^2 \mid \gamma, \nu, \alpha, \beta) = \mathcal{N}(\mu \mid \gamma, \sigma^2/\nu) \cdot \Gamma^{-1}(\sigma^2 \mid \alpha, \beta)= \text{N-}\Gamma^{-1}(\mu, \sigma^2 \mid \gamma, \nu, \alpha, \beta)$$
+where $\text{N-}\Gamma^{-1}$ is the normal-inverse-gamma distribution.
+
+So we can write the distribution over the pixel brightness as:
+\begin{align*}
+    &p(y \mid \gamma, \nu, \alpha, \beta) \\
+    &= \int_0^\infty \int_{-\infty}^\infty p(y \mid \mu, \sigma^2) p(\mu, \sigma^2 \mid \gamma, \nu, \alpha, \beta)\ \d\mu\,\d\sigma^2 \\
+    &= \int_0^\infty \int_{-\infty}^\infty \mathcal{N}(y \mid \mu, \sigma^2) \text{N-}\Gamma^{-1}(\mu, \sigma^2 \mid \gamma, \nu, \alpha, \beta)\ \d\mu\,\d\sigma^2 \\
+    &= \int_0^\infty \int_{-\infty}^\infty \mathcal{N}(y \mid \mu, \sigma^2) \cdot \mathcal{N}(\mu \mid \gamma, \sigma^2/\nu) \cdot \Gamma^{-1}(\sigma^2 \mid \alpha, \beta)\ \d\mu\,\d\sigma^2 \\
+    &= \int_0^\infty \Gamma^{-1}(\sigma^2 \mid \alpha, \beta) \left( \int_{-\infty}^\infty \mathcal{N}(y \mid \mu, \sigma^2) \cdot \mathcal{N}(\mu \mid \gamma, \sigma^2/\nu)\ \d\mu \right) \d\sigma^2
+\end{align*}
+
+The inner integral is a pain to derive, but it can be shown that:
+$$\int_{-\infty}^\infty \mathcal{N}(y \mid \mu, \sigma^2) \cdot \mathcal{N}(\mu \mid \gamma, \sigma^2/\nu)\ \d\mu = \mathcal{N}(y \mid \gamma, (1 + 1/\nu)\sigma^2)$$
+So we can write the distribution over the pixel brightness as:
+$$p(y \mid \gamma, \nu, \alpha, \beta) = \int_0^\infty \Gamma^{-1}(\sigma^2 \mid \alpha, \beta) \cdot \mathcal{N}(y \mid \gamma, (1 + 1/\nu)\sigma^2)\ \d\sigma^2$$
+This is also annoying to derive, but it can be shown that
+$$p(y \mid \gamma, \nu, \alpha, \beta) = \text{Student-}t_{2\alpha} \left( y \mid \mathrm{loc} = \gamma,\,\mathrm{scale}^2 = \f{\beta(\nu + 1)}{\alpha \nu} \right)$$
+where $\text{Student-}t_{2\alpha}$ is the Student's $t$ distribution with $2\alpha$ degrees of freedom.
+
+So we get a prediction along with measures of both aleatoric and epistemic uncertainty:
+$$\underbrace{\mathbb{E}[\mu] = \gamma}_{\text{prediction}}, \quad \underbrace{\mathbb{E}[\sigma^2] = \f{\beta}{\alpha - 1}}_{\text{aleatoric}}, \quad \underbrace{\mathrm{Var}[\mu] = \f{\beta}{\nu(\alpha - 1)}}_{\text{epistemic}}$$
+
+\subsubsection{Conjugate Priors}
+
+Let's say we get a bunch of samples $y_1, y_2, \ldots, y_n$. By Bayes' theorem:
+\begin{align*}
+    p(\mu, \sigma^2 \mid y_1, y_2, \ldots, y_n) &\propto p(\mu, \sigma^2) \prod_{i=1}^n p(y_i \mid \mu, \sigma^2) \\
+    &=\text{N-}\Gamma^{-1}(\mu, \sigma^2 \mid \gamma, \nu, \alpha, \beta) \cdot \prod_{i=1}^n \mathcal{N}(y_i \mid \mu, \sigma^2) \\
+    &=\Gamma^{-1}(\sigma^2 \mid \alpha, \beta) \cdot \mathcal{N}(\mu \mid \gamma, \sigma^2/\nu) \cdot \prod_{i=1}^n \mathcal{N}(y_i \mid \mu, \sigma^2)
+\end{align*}
+Note:
+$$\prod_{i=1}^n \mathcal{N}(y_i \mid \mu, \sigma^2) = \f{1}{(2\pi\sigma^2)^{n/2}} \exp\left(-\f{1}{2\sigma^2}\sum_{i=1}^n (y_i - \mu)^2\right)$$
+and
+$$\Gamma^{-1}(\sigma^2 \mid \alpha, \beta) = \f{\beta^\alpha}{\Gamma(\alpha)} (\sigma^2)^{-\alpha - 1} \exp\left(-\f{\beta}{\sigma^2}\right)$$
+and
+$$\mathcal{N}(\mu \mid \gamma, \sigma^2/\nu) = \f{1}{\sqrt{2\pi\sigma^2/\nu}} \exp\left(-\f{\nu}{2\sigma^2}(\mu - \gamma)^2\right)$$
+So we can write (omitting intermediate steps):
+$$p(\mu, \sigma^2 \mid \b{y}) = \mathcal{N}(\mu \mid \tilde{\gamma}, \sigma^2 / \tilde{\nu}) \cdot \Gamma^{-1}(\sigma^2 \mid \tilde{\alpha}, \tilde{\beta}) = \text{N-}\Gamma^{-1}(\mu, \sigma^2 \mid \tilde{\gamma}, \tilde{\nu}, \tilde{\alpha}, \tilde{\beta})$$
+where
+\begin{align*}
+    \tilde{\gamma} &= \f{\nu\gamma + \sum_{i=1}^n y_i}{\nu + n} \\
+    \tilde{\nu} &= \nu + n \\
+    \tilde{\alpha} &= \alpha + \f{n}{2} \\
+    \tilde{\beta} &= \beta + \f{1}{2}\sum_{i=1}^n (y_i - \bar{y})^2 + \f{\nu n}{2(\nu + n)}\left(\gamma - \bar{y}\right)^2
+\end{align*}
+So the posterior is also a normal-inverse-gamma distribution, which is nice because we can use the same model architecture for training and inference. This is called a conjugate prior.
+
+\subsection{Training}
+
+We need the model to now output the parameters of the prior distribution, i.e., $\gamma$, $\nu$, $\alpha$, and $\beta$, at each pixel. We will want our loss to be the negative log-likelihood, which is:
+$$\mathcal{L}_\mathrm{NLL}(\gamma, \nu, \alpha, \beta \mid y_1, y_2, \ldots, y_n) = -\log p(y_1, y_2, \ldots, y_n \mid \gamma, \nu, \alpha, \beta)$$
+This can be computed as:
+\begin{align*}
+    &\mathcal{L}_\mathrm{NLL}(\gamma, \nu, \alpha, \beta \mid y_1, y_2, \ldots, y_n) \\
+    &\propto \f{1}{2}\log\left(\f{\pi}{\nu}\right) - \alpha\log(\Omega) + \left(\alpha + \f{1}{2}\right)\log((y - \gamma)^2\nu + \Omega) + \log\left(\f{\Gamma(\alpha)}{\Gamma\left(\alpha + \f{1}{2}\right)}\right)
+\end{align*}
+where $\Omega = 2\beta(1 + \nu)$. The model may become overconfident by driving $\alpha,\nu \to \infty$, so we can add a regularization term to the loss:
+$$\mathcal{L}_\mathrm{reg}(\gamma, \nu, \alpha, \beta) = |y - \gamma|\f{1}{2\nu + \alpha}$$
+to penalize high confidence when the prediction is far from the mean.
+
+So the total loss is:
+$$\mathcal{L}(\gamma, \nu, \alpha, \beta \mid y_1, y_2, \ldots, y_n) = \mathcal{L}_\mathrm{NLL}(\gamma, \nu, \alpha, \beta \mid y_1, y_2, \ldots, y_n) + \lambda\mathcal{L}_\mathrm{reg}(\gamma, \nu, \alpha, \beta)$$
+
+\section{MC Dropout}
+
+\section{Bayesian By Backprop (BBB)}
+
+\section{Deep Ensembles}
+
+% Create bibliography with sensoy paper
+\bibliographystyle{plain}
+\bibliography{references}
+
+\end{document}

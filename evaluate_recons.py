@@ -116,17 +116,21 @@ def save_ssim_map(
     # make room for colorbar
     fig.subplots_adjust(right=0.85)
     fig.colorbar(im, ax=axes[1, 1:].tolist(), fraction=0.02, pad=0.02, location="right")
-    fig.savefig(outpath, dpi=300)
+    fig.savefig(outpath, dpi=200)
     plt.close(fig)
 
 
-def save_psnr_mssim_plot(gt, fdk, pl, dd, mask, outpath):
+def save_psnr_mssim_plot(gt, fdk, pl, dd, fbpcnn, iresnet, mask, outpath):
     psnr_fdk = psnr_per_slice(gt, fdk, mask)
     psnr_pl = psnr_per_slice(gt, pl, mask)
     psnr_ddcnn = psnr_per_slice(gt, dd, mask)
+    psnr_fbpcnn = psnr_per_slice(gt, fbpcnn, mask)
+    psnr_iresnet = psnr_per_slice(gt, iresnet, mask)
     mssim_fdk = mssim_per_slice(gt, fdk, mask)
     mssim_pl = mssim_per_slice(gt, pl, mask)
     mssim_ddcnn = mssim_per_slice(gt, dd, mask)
+    mssim_fbpcnn = mssim_per_slice(gt, fbpcnn, mask)
+    mssim_iresnet = mssim_per_slice(gt, iresnet, mask)
     N = gt.shape[2]
 
     fig, ax = plt.subplots(2, 2, figsize=(10, 8))
@@ -134,6 +138,8 @@ def save_psnr_mssim_plot(gt, fdk, pl, dd, mask, outpath):
     ax[0, 0].plot(range(N), mssim_fdk, label="FDK", color="blue")
     ax[0, 0].plot(range(N), mssim_pl, label="PL", color="orange")
     ax[0, 0].plot(range(N), mssim_ddcnn, label="DDCNN", color="green")
+    ax[0, 0].plot(range(N), mssim_fbpcnn, label="FBPCONVNet", color="red")
+    ax[0, 0].plot(range(N), mssim_iresnet, label="IResNet", color="purple")
     ax[0, 0].set(title="MSSIM vs Slice", xlabel="Slice", ylabel="MSSIM")
     ax[0, 0].legend()
 
@@ -158,12 +164,28 @@ def save_psnr_mssim_plot(gt, fdk, pl, dd, mask, outpath):
         label="DDCNN",
         alpha=0.6,
     )
+    ax[0, 1].hist(
+        mssim_fbpcnn,
+        color="red",
+        bins=50,
+        label="FBPCONVNet",
+        alpha=0.6,
+    )
+    ax[0, 1].hist(
+        mssim_iresnet,
+        color="purple",
+        bins=50,
+        label="IResNet",
+        alpha=0.6,
+    )
     ax[0, 1].set(title="MSSIM Histogram", xlabel="MSSIM")
     ax[0, 1].legend()
 
     ax[1, 0].plot(range(N), psnr_fdk, label="FDK", color="blue")
     ax[1, 0].plot(range(N), psnr_pl, label="PL", color="orange")
     ax[1, 0].plot(range(N), psnr_ddcnn, label="DDCNN", color="green")
+    ax[1, 0].plot(range(N), psnr_fbpcnn, label="FBPCONVNet", color="red")
+    ax[1, 0].plot(range(N), psnr_iresnet, label="IResNet", color="purple")
     ax[1, 0].set(title="PSNR vs Slice", xlabel="Slice", ylabel="PSNR (dB)")
     ax[1, 0].legend()
 
@@ -188,11 +210,25 @@ def save_psnr_mssim_plot(gt, fdk, pl, dd, mask, outpath):
         label="DDCNN",
         alpha=0.6,
     )
+    ax[1, 1].hist(
+        psnr_fbpcnn,
+        color="red",
+        bins=50,
+        label="FBPCONVNet",
+        alpha=0.6,
+    )
+    ax[1, 1].hist(
+        psnr_iresnet,
+        color="purple",
+        bins=50,
+        label="IResNet",
+        alpha=0.6,
+    )
     ax[1, 1].set(title="PSNR Histogram", xlabel="PSNR (dB)")
     ax[1, 1].legend()
 
     plt.tight_layout()
-    fig.savefig(outpath, dpi=300)
+    fig.savefig(outpath, dpi=200)
     plt.close(fig)
 
 
@@ -259,6 +295,16 @@ def main():
                 weights_only=False,
             )
 
+            # also load FBPCONVNet and IResNet variants
+            fbp_path = glob.glob(
+                os.path.join(mat_dir, f"p{pid}.{scan_type}{sid}_FBPCONVNet*_3D.pt")
+            )[0]
+            fbpcnn = torch.load(fbp_path, weights_only=False)
+            ire_path = glob.glob(
+                os.path.join(mat_dir, f"p{pid}.{scan_type}{sid}_IResNet*_3D.pt")
+            )[0]
+            iresnet = torch.load(ire_path, weights_only=False)
+
             # tumor location
             tlocs = torch.load(
                 os.path.join(
@@ -281,15 +327,19 @@ def main():
                 fdk_v = fdk.copy()
                 pl_v = pl.copy()
                 dd_v = ddcnn.copy()
+                fbpcnn_v = fbpcnn.copy()
+                iresnet_v = iresnet.copy()
                 t = tloc.copy()
                 if view == "height":
-                    gt, fdk_v, pl_v, dd_v = [
-                        np.swapaxes(x, 0, 2) for x in (gt, fdk_v, pl_v, dd_v)
+                    gt, fdk_v, pl_v, dd_v, fbpcnn_v, iresnet_v = [
+                        np.swapaxes(x, 0, 2)
+                        for x in (gt, fdk_v, pl_v, dd_v, fbpcnn_v, iresnet_v)
                     ]
                     t = np.array([t[2], t[1], t[0]])
                 elif view == "width":
-                    gt, fdk_v, pl_v, dd_v = [
-                        np.swapaxes(x, 1, 2) for x in (gt, fdk_v, pl_v, dd_v)
+                    gt, fdk_v, pl_v, dd_v, fbpcnn_v, iresnet_v = [
+                        np.swapaxes(x, 1, 2)
+                        for x in (gt, fdk_v, pl_v, dd_v, fbpcnn_v, iresnet_v)
                     ]
                     t = np.array([t[0], t[2], t[1]])
 
@@ -321,8 +371,8 @@ def main():
                 # 1) SSIM map
                 save_ssim_map(
                     gt,
-                    [fdk_v, pl_v, dd_v],
-                    ["FDK", "PL", "DDCNN"],
+                    [fdk_v, pl_v, dd_v, fbpcnn_v, iresnet_v],
+                    ["FDK", "PL", "DDCNN", "FBPCONVNet", "IResNet"],
                     mask,
                     tumor_slice,
                     (t[1], t[0]),
@@ -332,19 +382,35 @@ def main():
 
                 # 2) PSNR/MSSIM curves
                 save_psnr_mssim_plot(
-                    gt, fdk_v, pl_v, dd_v, mask, os.path.join(odir, "PSNR_MSSIM.png")
+                    gt,
+                    fdk_v,
+                    pl_v,
+                    dd_v,
+                    fbpcnn_v,
+                    iresnet_v,
+                    mask,
+                    os.path.join(odir, "PSNR_MSSIM.png"),
                 )
 
                 # 3) summary metrics
                 ps_all = {}
                 ms_all = {}
-                for name, arr in zip(["FDK", "PL", "DDCNN"], [fdk_v, pl_v, dd_v]):
+                for name, arr in zip(
+                    ["FDK", "PL", "FBPCONVNet", "IResNet", "DDCNN"],
+                    [fdk_v, pl_v, fbpcnn_v, iresnet_v, dd_v],
+                ):
                     ps = psnr_per_slice(gt, arr, mask)
                     ms = mssim_per_slice(gt, arr, mask)
                     ps_all[name] = np.nanmean(ps)
                     ms_all[name] = np.nanmean(ms)
                 # tumor slice only
-                recs = dict(FDK=fdk_v, PL=pl_v, DDCNN=dd_v)
+                recs = dict(
+                    FDK=fdk_v,
+                    PL=pl_v,
+                    FBPCONVNet=fbpcnn_v,
+                    IResNet=iresnet_v,
+                    DDCNN=dd_v,
+                )
                 for name, arr in recs.items():
                     ps_all[f"{name}_tumor"] = psnr_per_slice(gt, arr, mask)[tumor_slice]
                     ms_all[f"{name}_tumor"] = mssim_per_slice(gt, arr, mask)[
@@ -388,7 +454,13 @@ def main():
 """
         )
 
-        methods = [("FDK", "FDK"), ("PL", "IR"), ("DDCNN", "DDCNN")]
+        methods = [
+            ("FDK", "FDK"),
+            ("PL", "IR"),
+            ("FBPCONVNet", "FBPCONVNet"),
+            ("IResNet", "IResNet"),
+            ("DDCNN", "DDCNN"),
+        ]
 
         for view in VIEWS:
             # subset for this view
@@ -398,9 +470,13 @@ def main():
                 {
                     "psnr_FDK": "mean",
                     "psnr_PL": "mean",
+                    "psnr_FBPCONVNet": "mean",
+                    "psnr_IResNet": "mean",
                     "psnr_DDCNN": "mean",
                     "mssim_FDK": "mean",
                     "mssim_PL": "mean",
+                    "mssim_FBPCONVNet": "mean",
+                    "mssim_IResNet": "mean",
                     "mssim_DDCNN": "mean",
                 }
             )

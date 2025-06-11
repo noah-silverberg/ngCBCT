@@ -312,22 +312,22 @@ def main():
                 odir = os.path.join(OUTPUT_DIR, f"{scan_type}_p{pid}_{sid}_{view}")
                 os.makedirs(odir, exist_ok=True)
 
-                # 1) SSIM map
-                save_ssim_map(
-                    gt,
-                    [fdk_v, pl_v, dd_v],
-                    ["FDK", "PL", "DDCNN"],
-                    mask,
-                    tumor_slice,
-                    (t[1], t[0]),
-                    os.path.join(odir, "SSIM_map.png"),
-                    scan_type,
-                )
+                # # 1) SSIM map
+                # save_ssim_map(
+                #     gt,
+                #     [fdk_v, pl_v, dd_v],
+                #     ["FDK", "PL", "DDCNN"],
+                #     mask,
+                #     tumor_slice,
+                #     (t[1], t[0]),
+                #     os.path.join(odir, "SSIM_map.png"),
+                #     scan_type,
+                # )
 
-                # 2) PSNR/MSSIM curves
-                save_psnr_mssim_plot(
-                    gt, fdk_v, pl_v, dd_v, mask, os.path.join(odir, "PSNR_MSSIM.png")
-                )
+                # # 2) PSNR/MSSIM curves
+                # save_psnr_mssim_plot(
+                #     gt, fdk_v, pl_v, dd_v, mask, os.path.join(odir, "PSNR_MSSIM.png")
+                # )
 
                 # 3) summary metrics
                 ps_all = {}
@@ -359,15 +359,52 @@ def main():
     df = pd.DataFrame(records)
     df.to_csv(os.path.join(OUTPUT_DIR, "summary.csv"), index=False)
 
-    # LaTeX table
-    with open(os.path.join(OUTPUT_DIR, "summary.tex"), "w") as f:
+    # LaTeX full‐document output
+    tex_path = os.path.join(OUTPUT_DIR, "summary.tex")
+    with open(tex_path, "w") as f:
+        f.write(
+            r"""\documentclass{article}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage{amsthm}
+\usepackage{hyperref}
+\usepackage{underscore} % allow underscores in table text
+\hypersetup{colorlinks=true, urlcolor=blue, linkcolor=blue, citecolor=red}
+\usepackage{booktabs}
+
+\title{Analysis of DDCNN Performance}
+\author{Noah Silverberg}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section{Summary table}
+\begin{table}[ht]
+\caption{Mean PSNR and MSSIM across all slices and tumor slice}
+\label{tab:summary}
+\resizebox{\textwidth}{!}{%
+"""
+        )
+        # insert only the tabular itself
         f.write(
             df.to_latex(
                 index=False,
                 float_format="%.3f",
-                caption="Mean PSNR and MSSIM across all slices and tumor slice",
-                label="tab:summary",
+                escape=False,  # keep underscores
+                header=True,
+                longtable=False,
             )
+        )
+        # finish the document
+        f.write(
+            r"""%
+} % end resizebox
+\end{table}
+
+\end{document}
+"""
         )
 
     print("Done! Outputs in", OUTPUT_DIR)

@@ -196,6 +196,80 @@ def save_psnr_mssim_plot(gt, fdk, pl, dd, mask, outpath):
     plt.close(fig)
 
 
+# ──────────────────────────────────────────────────────
+# helper: collect per‐slice metrics across all patients/views
+# ──────────────────────────────────────────────────────
+def collect_per_slice(df, base_dir, scan_type, metric_fn):
+    """
+    df: the DataFrame of records
+    base_dir: same as BASE_DIR
+    scan_type: "FF" or "HF"
+    metric_fn: one of psnr_per_slice or mssim_per_slice
+    returns: dict view → list of arrays (one array per volume)
+    """
+    out = {v: [] for v in VIEWS}
+    for _, row in df[df.scan_type == scan_type].iterrows():
+        # reload volumes exactly as in main...
+        pid, sid, view = row.patient_id, row.scan_id, row["view"]
+        mat_dir = os.path.join(base_dir, scan_type)
+        # reconstruct GT and DDCNN paths
+        if scan_type == "FF":
+            gt_path = os.path.join(
+                mat_dir,
+                f"recon_p{pid}.{scan_type}{sid}.u_FDK_ROI_fullView.mat",
+            )
+            ds = 14
+        else:
+            gt_path = os.path.join(
+                mat_dir, f"recon_p{pid}.{scan_type}{sid}.u_FDK_full.mat"
+            )
+            ds = 13
+        dd_path = os.path.join(
+            mat_dir,
+            f"p{pid}.{scan_type}{sid}_IResNet_MK6_DS{ds}.2_run{RUN}_3D.pt",
+        )
+
+        # load GT volume
+        gt_mat = loadmat(gt_path)
+        if scan_type == "FF":
+            gt_vol = gt_mat["u_FDK_ROI_fullView"]
+        else:
+            gt_vol = gt_mat["u_FDK_full"]
+
+        # crop slices & ROI for FF
+        gt_vol = gt_vol[..., 20:-20]
+        if scan_type == "FF":
+            gt_vol = gt_vol[128:-128, 128:-128]
+
+        # load DDCNN output
+        ddcnn = torch.load(dd_path, weights_only=False)
+
+        # apply view‐specific axis swap
+        gt_v = gt_vol.copy()
+        rec_v = ddcnn.copy()
+        if view == "height":
+            gt_v = np.swapaxes(gt_v, 0, 2)
+            rec_v = np.swapaxes(rec_v, 0, 2)
+        elif view == "width":
+            gt_v = np.swapaxes(gt_v, 1, 2)
+            rec_v = np.swapaxes(rec_v, 1, 2)
+
+        # build mask
+        if scan_type == "FF":
+            mask = make_mask(gt_v, view)
+        else:
+            mask = np.ones(gt_v.shape[:2], dtype=bool)
+
+        # normalize GT to [0,1]
+        np.clip(gt_v, 0, 0.04, out=gt_v)
+        gt_v -= gt_v.min()
+        gt_v /= gt_v.max()
+        # then:
+        arr = metric_fn(gt_v, rec_v, mask)
+        out[view].append(arr)
+    return out
+
+
 # -----------------------------------------------------------------------------
 # MAIN
 # -----------------------------------------------------------------------------
@@ -213,7 +287,7 @@ def main():
         else:
             patt = os.path.join(mat_dir, f"recon_p*.{scan_type}??.u_FDK_full.mat")
 
-        for gt_path in glob.glob(patt):
+        for gt_path in glob.glob(patt)[:2]:  # TODO remove [:2]
             # extract patient & scan IDs: recon_p{pid}.{type}{sid}.*
             base = os.path.basename(gt_path)
             pid = base.split(".")[0].split("p")[1]
@@ -312,7 +386,7 @@ def main():
                 odir = os.path.join(OUTPUT_DIR, f"{scan_type}_p{pid}_{sid}_{view}")
                 os.makedirs(odir, exist_ok=True)
 
-                # # 1) SSIM map
+                # # 1) SSIM map # TODO uncomment these plots
                 # save_ssim_map(
                 #     gt,
                 #     [fdk_v, pl_v, dd_v],
@@ -358,6 +432,133 @@ def main():
     # write summary
     df = pd.DataFrame(records)
     df.to_csv(os.path.join(OUTPUT_DIR, "summary.csv"), index=False)
+
+    # ──────────────────────────────────────────────────────
+    # 1) write separate LaTeX tables for FF vs HF (grouped by view)
+    # ──────────────────────────────────────────────────────
+    for stype, sub in df.groupby("scan_type"):
+        # aggregate mean ± std per view
+        agg = sub.groupby("view")[["psnr_DDCNN", "mssim_DDCNN"]].agg(["mean", "std"])
+
+        # format mean±std (PSNR: 1 decimal, MSSIM: 3 decimals)
+        def fmt(val, sd, metric):
+            if metric == "psnr_DDCNN":
+                return f"{val:.1f}±{sd:.1f}"
+            else:
+                return f"{val:.3f}±{sd:.3f}"
+
+        table = agg.reset_index().assign(
+            PSNR=lambda d: [
+                fmt(m, s, "psnr_DDCNN")
+                for (m, s) in zip(d[("psnr_DDCNN", "mean")], d[("psnr_DDCNN", "std")])
+            ],
+            SSIM=lambda d: [
+                fmt(m, s, "mssim_DDCNN")
+                for (m, s) in zip(d[("mssim_DDCNN", "mean")], d[("mssim_DDCNN", "std")])
+            ],
+        )[["view", "PSNR", "SSIM"]]
+
+        tex = table.to_latex(
+            index=False,
+            escape=False,
+            caption=f"{stype} – Mean DDCNN PSNR & SSIM by view",
+            label=f"tab:{stype.lower()}_by_view",
+        )
+        with open(os.path.join(OUTPUT_DIR, f"summary_{stype}.tex"), "w") as fh:
+            fh.write(r"\begin{table}[ht]\centering" + "\n")
+            fh.write(tex.replace("\\toprule", "\\toprule\n\\midrule"))
+            fh.write(r"\end{table}")
+
+        # ──────────────────────────────────────────────────────
+    # 2) view-centric bar charts: mean±std for DDCNN only
+    # ──────────────────────────────────────────────────────
+    import matplotlib.pyplot as plt
+
+    for metric, ylabel, fmt in [
+        ("psnr_DDCNN", "PSNR (dB)", "{:.1f}"),
+        ("mssim_DDCNN", "MSSIM", "{:.3f}"),
+    ]:
+        fig, ax = plt.subplots(figsize=(6, 4))
+        summary = (
+            df.groupby(["view", "scan_type"])[metric]
+            .agg(["mean", "std"])
+            .unstack("scan_type")
+        )
+        # bars for FF, HF side-by-side
+        summary["mean"].plot.bar(
+            y=["FF", "HF"], yerr=summary["std"][["FF", "HF"]], rot=0, ax=ax
+        )
+        ax.set_xlabel("View")
+        ax.set_ylabel(ylabel)
+        ax.set_title(f"DDCNN {ylabel} by View (mean±SD)")
+        # annotate bar labels
+        for p in ax.patches:
+            h = p.get_height()
+            if not np.isnan(h):
+                ax.text(
+                    p.get_x() + p.get_width() / 2,
+                    h + 0.01 * h,
+                    fmt.format(h),
+                    ha="center",
+                    va="bottom",
+                    fontsize=8,
+                )
+        plt.tight_layout()
+        fig.savefig(os.path.join(OUTPUT_DIR, f"bar_{metric}.png"), dpi=300)
+        plt.close(fig)
+
+        # ──────────────────────────────────────────────────────
+    # 4) boxplots of slice‐wise PSNR & SSIM for each scan_type
+    # ──────────────────────────────────────────────────────
+    import matplotlib.pyplot as plt
+
+    for stype in SCAN_TYPES:
+        # PSNR boxplot
+        ps_data = collect_per_slice(df, BASE_DIR, stype, psnr_per_slice)
+        fig, ax = plt.subplots(1, 1, figsize=(6, 4))
+        ax.boxplot(
+            [np.concatenate(ps_data[v]) for v in VIEWS], labels=VIEWS, showfliers=False
+        )
+        ax.set_title(f"{stype} PSNR distribution across all slices")
+        ax.set_ylabel("PSNR (dB)")
+        plt.tight_layout()
+        fig.savefig(os.path.join(OUTPUT_DIR, f"box_psnr_{stype}.png"), dpi=300)
+        plt.close(fig)
+
+        # SSIM boxplot
+        ss_data = collect_per_slice(df, BASE_DIR, stype, mssim_per_slice)
+        fig, ax = plt.subplots(1, 1, figsize=(6, 4))
+        ax.boxplot(
+            [np.concatenate(ss_data[v]) for v in VIEWS], labels=VIEWS, showfliers=False
+        )
+        ax.set_title(f"{stype} SSIM distribution across all slices")
+        ax.set_ylabel("SSIM")
+        plt.tight_layout()
+        fig.savefig(os.path.join(OUTPUT_DIR, f"box_ssim_{stype}.png"), dpi=300)
+        plt.close(fig)
+
+        # ──────────────────────────────────────────────────────
+    # 5) overall FF vs HF (averaged over view & patient)
+    # ──────────────────────────────────────────────────────
+    agg2 = df.groupby("scan_type")[["psnr_DDCNN", "mssim_DDCNN"]].agg(["mean", "std"])
+    # format as “val±sd”
+    summary2 = {
+        stype: {
+            "PSNR": f"{agg2.loc[stype,('psnr_DDCNN','mean')]:.1f}±{agg2.loc[stype,('psnr_DDCNN','std')]:.1f}",
+            "SSIM": f"{agg2.loc[stype,('mssim_DDCNN','mean')]:.3f}±{agg2.loc[stype,('mssim_DDCNN','std')]:.3f}",
+        }
+        for stype in SCAN_TYPES
+    }
+    df2 = pd.DataFrame.from_dict(summary2, orient="index")[["PSNR", "SSIM"]]
+    df2.to_csv(os.path.join(OUTPUT_DIR, "summary_overall.csv"))
+    with open(os.path.join(OUTPUT_DIR, "summary_overall.tex"), "w") as fh:
+        fh.write(
+            df2.to_latex(
+                escape=False,
+                caption="Overall DDCNN PSNR & SSIM (FF vs HF)",
+                label="tab:overall",
+            )
+        )
 
     # LaTeX full‐document output
     tex_path = os.path.join(OUTPUT_DIR, "summary.tex")

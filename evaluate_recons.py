@@ -298,11 +298,19 @@ def main():
             # also load FBPCONVNet and IResNet variants
             fbp_path = glob.glob(
                 os.path.join(mat_dir, f"p{pid}.{scan_type}{sid}_FBPCONVNet*_3D.pt")
-            )[0]
+            )
+            if len(fbp_path) > 1:
+                raise
+            else:
+                fbp_path = fbp_path[0]
             fbpcnn = torch.load(fbp_path, weights_only=False)
             ire_path = glob.glob(
-                os.path.join(mat_dir, f"p{pid}.{scan_type}{sid}_IResNet*_3D.pt")
-            )[0]
+                os.path.join(mat_dir, f"p{pid}.{scan_type}{sid}_IResNet*PL_3D.pt")
+            )
+            if len(ire_path) > 1:
+                raise
+            else:
+                ire_path = ire_path[0]
             iresnet = torch.load(ire_path, weights_only=False)
 
             # tumor location

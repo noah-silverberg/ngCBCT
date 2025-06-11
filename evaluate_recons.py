@@ -378,7 +378,7 @@ def main():
 \usepackage{underscore}
 \usepackage{hyperref}
 \hypersetup{colorlinks=true,urlcolor=blue}
-\title{DDCNN Evaluation Report}
+\title{DDCNN Performance Data}
 \author{Noah Silverberg}
 \date{\today}
 
@@ -578,14 +578,14 @@ def main():
                 }
             )
             tps = [
-                f"{avg.loc['psnr_FDK_tumor','mean']:.1f}±{avg.loc['psnr_FDK_tumor','std']:.1f}",
-                f"{avg.loc['psnr_PL_tumor','mean']:.1f}±{avg.loc['psnr_PL_tumor','std']:.1f}",
-                f"{avg.loc['psnr_DDCNN_tumor','mean']:.1f}±{avg.loc['psnr_DDCNN_tumor','std']:.1f}",
+                f"{avg.loc['mean',  'psnr_FDK_tumor']:.1f}±{avg.loc['std','psnr_FDK_tumor']:.1f}",
+                f"{avg.loc['mean',  'psnr_PL_tumor'] :.1f}±{avg.loc['std','psnr_PL_tumor'] :.1f}",
+                f"{avg.loc['mean','psnr_DDCNN_tumor']:.1f}±{avg.loc['std','psnr_DDCNN_tumor']:.1f}",
             ]
             tss = [
-                f"{avg.loc['mssim_FDK_tumor','mean']:.3f}±{avg.loc['mssim_FDK_tumor','std']:.3f}",
-                f"{avg.loc['mssim_PL_tumor','mean']:.3f}±{avg.loc['mssim_PL_tumor','std']:.3f}",
-                f"{avg.loc['mssim_DDCNN_tumor','mean']:.3f}±{avg.loc['mssim_DDCNN_tumor','std']:.3f}",
+                f"{avg.loc['mean',  'mssim_FDK_tumor']:.3f}±{avg.loc['std','mssim_FDK_tumor']:.3f}",
+                f"{avg.loc['mean',  'mssim_PL_tumor'] :.3f}±{avg.loc['std','mssim_PL_tumor'] :.3f}",
+                f"{avg.loc['mean','mssim_DDCNN_tumor']:.3f}±{avg.loc['std','mssim_DDCNN_tumor']:.3f}",
             ]
             f.write(
                 f"{st} & {tps[0]} & {tps[1]} & {tps[2]} & {tss[0]} & {tss[1]} & {tss[2]} \\\\\n"

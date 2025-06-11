@@ -434,7 +434,7 @@ def main():
     df.to_csv(os.path.join(OUTPUT_DIR, "summary.csv"), index=False)
 
     # ──────────────────────────────────────────────────────
-    # LaTeX full-document output: all requested tables
+    # LaTeX full‐document output: 8 tables as specified
     # ──────────────────────────────────────────────────────
     tex_path = os.path.join(OUTPUT_DIR, "summary.tex")
     with open(tex_path, "w") as f:
@@ -445,168 +445,131 @@ def main():
 \usepackage{amsmath,amssymb}
 \usepackage{underscore}
 \usepackage{hyperref}
-\hypersetup{colorlinks=true, urlcolor=blue}
+\hypersetup{colorlinks=true,urlcolor=blue}
 \title{DDCNN Evaluation Report}
 \author{Noah Silverberg}
 \date{\today}
 
 \begin{document}
 \maketitle
+
 """
         )
 
-        # 0) Full detailed table (all scans, all views)
-        f.write(r"\section*{All Scans Detailed Metrics}" + "\n")
-        cols = [
-            "scan_type",
-            "patient_id",
-            "scan_id",
-            "view",
-            "psnr_FDK",
-            "psnr_PL",
-            "psnr_DDCNN",
-            "mssim_FDK",
-            "mssim_PL",
-            "mssim_DDCNN",
-            "psnr_FDK_tumor",
-            "psnr_PL_tumor",
-            "psnr_DDCNN_tumor",
-            "mssim_FDK_tumor",
-            "mssim_PL_tumor",
-            "mssim_DDCNN_tumor",
-        ]
-        tbl_full = df[cols].sort_values(["scan_type", "patient_id", "scan_id", "view"])
-        # format floats
-        fmt1 = lambda x: f"{x:.1f}"
-        fmt3 = lambda x: f"{x:.3f}"
-        for c in tbl_full.columns:
-            if c.startswith("psnr"):
-                tbl_full[c] = tbl_full[c].map(fmt1)
-            elif c.startswith("mssim"):
-                tbl_full[c] = tbl_full[c].map(fmt3)
-        # shrink wide table to fit page
-        f.write(r"\resizebox{\textwidth}{!}{%" + "\n")
-        f.write(
-            tbl_full.to_latex(
-                index=False,
-                escape=True,
-                caption="Per‐scan metrics by view",
-                label="tab:all_scans",
-            )
-            + "\n"
-        )
-        f.write("}%\n")
-
-        # helper to write aggregated view‐tables
-        def write_agg(section_title, df_sub, suffix):
-            f.write(r"\section*{%s}" % section_title + "\n")
-            agg = df_sub.groupby("view")[
-                [
-                    "psnr_FDK",
-                    "psnr_PL",
-                    "psnr_DDCNN",
-                    "mssim_FDK",
-                    "mssim_PL",
-                    "mssim_DDCNN",
-                ]
-            ].agg(["mean", "std"])
-            # flatten MultiIndex
-            agg.columns = [f"{m.upper()}_{met.upper()}" for m, met in agg.columns]
-            # build final table: rows=view, cols=PSNR_{mean±std}, MSSIM_{mean±std} per method
-            tbl = pd.DataFrame(index=agg.index)
-            for method in ["FDK", "PL", "DDCNN"]:
-                ps_mean = agg[f"PSNR_{method}_MEAN"]
-                ps_std = agg[f"PSNR_{method}_STD"]
-                ss_mean = agg[f"MSSIM_{method}_MEAN"]
-                ss_std = agg[f"MSSIM_{method}_STD"]
-                tbl[f"{method} PSNR"] = (
-                    ps_mean.round(1).astype(str) + "±" + ps_std.round(1).astype(str)
-                )
-                tbl[f"{method} SSIM"] = (
-                    ss_mean.round(3).astype(str) + "±" + ss_std.round(3).astype(str)
-                )
-            tbl.index.name = "View"
-            # shrink if too wide
+        def write_detailed(df_sub, prefix, desc, tumor=False):
+            """Table listing each scan, grouped by view."""
+            key = "_tumor" if tumor else ""
+            cols = [f"psnr_{m}{key}" for m in ["FDK", "PL", "DDCNN"]] + [
+                f"mssim_{m}{key}" for m in ["FDK", "PL", "DDCNN"]
+            ]
+            tbl = df_sub.sort_values(["view", "patient_id", "scan_id"])[
+                ["view", "patient_id", "scan_id"] + cols
+            ].copy()
+            # format
+            for c in cols:
+                if c.startswith("psnr"):
+                    tbl[c] = tbl[c].map(lambda x: f"{x:.1f}")
+                else:
+                    tbl[c] = tbl[c].map(lambda x: f"{x:.3f}")
+            f.write(r"\begin{table}[ht]\centering" + "\n")
             f.write(r"\resizebox{\textwidth}{!}{%" + "\n")
+            f.write(r"\begin{tabular}{l ll | ccc | ccc}" + "\n")
+            f.write(r"\toprule" + "\n")
             f.write(
-                tbl.to_latex(
-                    escape=False,
-                    caption=suffix,
-                    label=None,
+                r"View & Patient & Scan"
+                r" & \multicolumn{3}{c}{PSNR (dB)}"
+                r" & \multicolumn{3}{c}{SSIM} \\" + "\n"
+            )
+            f.write(r" &  & " r"& FDK & PL & DDCNN" r"& FDK & PL & DDCNN \\" + "\n")
+            f.write(r"\midrule" + "\n")
+            current_view = None
+            for _, row in tbl.iterrows():
+                if row["view"] != current_view:
+                    f.write(r"\addlinespace" + "\n")
+                    current_view = row["view"]
+                f.write(
+                    f"{row['view']} & {row.patient_id} & {row.scan_id} "
+                    f"& {row[cols[0]]} & {row[cols[1]]} & {row[cols[2]]} "
+                    f"& {row[cols[3]]} & {row[cols[4]]} & {row[cols[5]]} \\\\\n"
                 )
+            f.write(r"\bottomrule" + "\n")
+            f.write(r"\end{tabular}%" + "\n")
+            f.write(r"}" + "\n")
+            cap = f"{prefix} PSNR \\& MSSIM, {desc}"
+            f.write(r"\caption{" + cap + "}" + "\n")
+            f.write(r"\end{table}" + "\n\n")
+
+        def write_agg(df_sub, prefix, desc, tumor=False):
+            """3-row table: one row per view, mean±sd across scans."""
+            key = "_tumor" if tumor else ""
+            # compute
+            agg = df_sub.groupby("view").agg(
+                {f"psnr_{m}{key}": ["mean", "std"] for m in ["FDK", "PL", "DDCNN"]}
+                | {f"mssim_{m}{key}": ["mean", "std"] for m in ["FDK", "PL", "DDCNN"]}
+            )
+            # flatten
+            methods = ["FDK", "PL", "DDCNN"]
+            rows = []
+            for view in VIEWS:
+                ps = []
+                ss = []
+                for m in methods:
+                    mu, sd = (
+                        agg.loc[view, (f"psnr_{m}{key}", "mean")],
+                        agg.loc[view, (f"psnr_{m}{key}", "std")],
+                    )
+                    ps.append(f"{mu:.1f}±{sd:.1f}")
+                    mu2, sd2 = (
+                        agg.loc[view, (f"mssim_{m}{key}", "mean")],
+                        agg.loc[view, (f"mssim_{m}{key}", "std")],
+                    )
+                    ss.append(f"{mu2:.3f}±{sd2:.3f}")
+                rows.append((view, *ps, *ss))
+            f.write(r"\begin{table}[ht]\centering" + "\n")
+            f.write(r"\resizebox{\textwidth}{!}{%" + "\n")
+            f.write(r"\begin{tabular}{l | ccc | ccc}" + "\n")
+            f.write(r"\toprule" + "\n")
+            f.write(
+                r"View & \multicolumn{3}{c}{PSNR (dB)} & \multicolumn{3}{c}{SSIM} \\"
                 + "\n"
             )
-            f.write("}%\n")
+            f.write(r" & FDK & PL & DDCNN & FDK & PL & DDCNN \\" + "\n")
+            f.write(r"\midrule" + "\n")
+            for row in rows:
+                f.write(" & ".join(row[:1] + tuple(row[1:])) + r" \\" + "\n")
+            f.write(r"\bottomrule" + "\n")
+            f.write(r"\end{tabular}%" + "\n")
+            f.write(r"}" + "\n")
+            cap = f"{prefix} PSNR \\& MSSIM, {desc}"
+            f.write(r"\caption{" + cap + "}" + "\n")
+            f.write(r"\end{table}" + "\n\n")
 
-        # 1 & 2: FF aggregated by view
-        ff = df[df.scan_type == "FF"]
+        # Detailed tables (grouped by view)
+        write_detailed(df[df.scan_type == "FF"], "FF", "averaged over all slices")
+        write_detailed(df[df.scan_type == "FF"], "FF", "tumor slice only", tumor=True)
+        write_detailed(df[df.scan_type == "HF"], "HF", "averaged over all slices")
+        write_detailed(df[df.scan_type == "HF"], "HF", "tumor slice only", tumor=True)
+
+        # Aggregated tables (3 rows per view)
         write_agg(
-            "FF — All‐Slices Mean±SD by View",
-            ff[
-                [
-                    "view",
-                    "psnr_FDK",
-                    "psnr_PL",
-                    "psnr_DDCNN",
-                    "mssim_FDK",
-                    "mssim_PL",
-                    "mssim_DDCNN",
-                ]
-            ],
-            "FF All‐slices (mean±SD)",
+            df[df.scan_type == "FF"], "FF", "averaged over all scans \\& all slices"
+        )
+        write_agg(
+            df[df.scan_type == "FF"],
+            "FF",
+            "averaged over all scans, for tumor slice only",
+            tumor=True,
+        )
+        write_agg(
+            df[df.scan_type == "HF"], "HF", "averaged over all scans \\& all slices"
+        )
+        write_agg(
+            df[df.scan_type == "HF"],
+            "HF",
+            "averaged over all scans, for tumor slice only",
+            tumor=True,
         )
 
-        write_agg(
-            "FF — Tumor‐Slice Mean±SD by View",
-            ff[
-                [
-                    "view",
-                    "psnr_FDK_tumor",
-                    "psnr_PL_tumor",
-                    "psnr_DDCNN_tumor",
-                    "mssim_FDK_tumor",
-                    "mssim_PL_tumor",
-                    "mssim_DDCNN_tumor",
-                ]
-            ].rename(columns=lambda c: c.replace("_tumor", "")),
-            "FF Tumor slice (mean±SD)",
-        )
-
-        # 3 & 4: HF aggregated by view
-        hf = df[df.scan_type == "HF"]
-        write_agg(
-            "HF — All‐Slices Mean±SD by View",
-            hf[
-                [
-                    "view",
-                    "psnr_FDK",
-                    "psnr_PL",
-                    "psnr_DDCNN",
-                    "mssim_FDK",
-                    "mssim_PL",
-                    "mssim_DDCNN",
-                ]
-            ],
-            "HF All‐slices (mean±SD)",
-        )
-
-        write_agg(
-            "HF — Tumor‐Slice Mean±SD by View",
-            hf[
-                [
-                    "view",
-                    "psnr_FDK_tumor",
-                    "psnr_PL_tumor",
-                    "psnr_DDCNN_tumor",
-                    "mssim_FDK_tumor",
-                    "mssim_PL_tumor",
-                    "mssim_DDCNN_tumor",
-                ]
-            ].rename(columns=lambda c: c.replace("_tumor", "")),
-            "HF Tumor slice (mean±SD)",
-        )
-
-        # document end
         f.write(r"\end{document}" + "\n")
 
     print("Done! Outputs in", OUTPUT_DIR)

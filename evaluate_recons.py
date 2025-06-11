@@ -196,80 +196,6 @@ def save_psnr_mssim_plot(gt, fdk, pl, dd, mask, outpath):
     plt.close(fig)
 
 
-# ──────────────────────────────────────────────────────
-# helper: collect per‐slice metrics across all patients/views
-# ──────────────────────────────────────────────────────
-def collect_per_slice(df, base_dir, scan_type, metric_fn):
-    """
-    df: the DataFrame of records
-    base_dir: same as BASE_DIR
-    scan_type: "FF" or "HF"
-    metric_fn: one of psnr_per_slice or mssim_per_slice
-    returns: dict view → list of arrays (one array per volume)
-    """
-    out = {v: [] for v in VIEWS}
-    for _, row in df[df.scan_type == scan_type].iterrows():
-        # reload volumes exactly as in main...
-        pid, sid, view = row.patient_id, row.scan_id, row["view"]
-        mat_dir = os.path.join(base_dir, scan_type)
-        # reconstruct GT and DDCNN paths
-        if scan_type == "FF":
-            gt_path = os.path.join(
-                mat_dir,
-                f"recon_p{pid}.{scan_type}{sid}.u_FDK_ROI_fullView.mat",
-            )
-            ds = 14
-        else:
-            gt_path = os.path.join(
-                mat_dir, f"recon_p{pid}.{scan_type}{sid}.u_FDK_full.mat"
-            )
-            ds = 13
-        dd_path = os.path.join(
-            mat_dir,
-            f"p{pid}.{scan_type}{sid}_IResNet_MK6_DS{ds}.2_run{RUN}_3D.pt",
-        )
-
-        # load GT volume
-        gt_mat = loadmat(gt_path)
-        if scan_type == "FF":
-            gt_vol = gt_mat["u_FDK_ROI_fullView"]
-        else:
-            gt_vol = gt_mat["u_FDK_full"]
-
-        # crop slices & ROI for FF
-        gt_vol = gt_vol[..., 20:-20]
-        if scan_type == "FF":
-            gt_vol = gt_vol[128:-128, 128:-128]
-
-        # load DDCNN output
-        ddcnn = torch.load(dd_path, weights_only=False)
-
-        # apply view‐specific axis swap
-        gt_v = gt_vol.copy()
-        rec_v = ddcnn.copy()
-        if view == "height":
-            gt_v = np.swapaxes(gt_v, 0, 2)
-            rec_v = np.swapaxes(rec_v, 0, 2)
-        elif view == "width":
-            gt_v = np.swapaxes(gt_v, 1, 2)
-            rec_v = np.swapaxes(rec_v, 1, 2)
-
-        # build mask
-        if scan_type == "FF":
-            mask = make_mask(gt_v, view)
-        else:
-            mask = np.ones(gt_v.shape[:2], dtype=bool)
-
-        # normalize GT to [0,1]
-        np.clip(gt_v, 0, 0.04, out=gt_v)
-        gt_v -= gt_v.min()
-        gt_v /= gt_v.max()
-        # then:
-        arr = metric_fn(gt_v, rec_v, mask)
-        out[view].append(arr)
-    return out
-
-
 # -----------------------------------------------------------------------------
 # MAIN
 # -----------------------------------------------------------------------------
@@ -373,6 +299,12 @@ def main():
                 else:
                     mask = np.ones(gt.shape[:2], dtype=bool)
                 tumor_slice = int(t[2])
+
+                # adjust SSIM window size per scan_type & view
+                if scan_type == "HF":
+                    SSIM_KWARGS["win_size"] = 15 if view == "index" else 11
+                else:  # FF
+                    SSIM_KWARGS["win_size"] = 11 if view == "index" else 7
 
                 # normalize & clip
                 # only clip/normalize GT, FDK, PL

@@ -164,10 +164,10 @@ $$\mathcal{L}_\mathrm{NLL}(\gamma, \nu, \alpha, \beta \mid y_1, y_2, \ldots, y_n
 This can be computed as:
 \begin{align*}
     &\mathcal{L}_\mathrm{NLL}(\gamma, \nu, \alpha, \beta \mid y_1, y_2, \ldots, y_n) \\
-    &\propto \f{1}{2}\log\left(\f{\pi}{\nu}\right) - \alpha\log(\Omega) + \left(\alpha + \f{1}{2}\right)\log((y - \gamma)^2\nu + \Omega) + \log\left(\f{\Gamma(\alpha)}{\Gamma\left(\alpha + \f{1}{2}\right)}\right)
+    &= \f{1}{2}\log\left(\f{\pi}{\nu}\right) - \alpha\log(\Omega) + \left(\alpha + \f{1}{2}\right)\log((y - \gamma)^2\nu + \Omega) + \log\left(\f{\Gamma(\alpha)}{\Gamma\left(\alpha + \f{1}{2}\right)}\right)
 \end{align*}
 where $\Omega = 2\beta(1 + \nu)$. The model may become overconfident by driving $\alpha,\nu \to \infty$, so we can add a regularization term to the loss:
-$$\mathcal{L}_\mathrm{reg}(\gamma, \nu, \alpha, \beta) = |y - \gamma|\f{1}{2\nu + \alpha}$$
+$$\mathcal{L}_\mathrm{reg}(\gamma, \nu, \alpha, \beta) = |y - \gamma| \cdot (2\nu + \alpha)$$
 to penalize high confidence when the prediction is far from the mean.
 
 So the total loss is:

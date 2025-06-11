@@ -434,162 +434,6 @@ def main():
     df.to_csv(os.path.join(OUTPUT_DIR, "summary.csv"), index=False)
 
     # ──────────────────────────────────────────────────────
-    # 2) view-centric bar charts: mean±std for DDCNN only
-    # ──────────────────────────────────────────────────────
-    import matplotlib.pyplot as plt
-
-    for metric, ylabel, fmt in [
-        ("psnr_DDCNN", "PSNR (dB)", "{:.1f}"),
-        ("mssim_DDCNN", "MSSIM", "{:.3f}"),
-    ]:
-        fig, ax = plt.subplots(figsize=(6, 4))
-        summary = (
-            df.groupby(["view", "scan_type"])[metric]
-            .agg(["mean", "std"])
-            .unstack("scan_type")
-        )
-        # bars for FF, HF side-by-side
-        summary["mean"].plot.bar(
-            y=["FF", "HF"], yerr=summary["std"][["FF", "HF"]], rot=0, ax=ax
-        )
-        ax.set_xlabel("View")
-        ax.set_ylabel(ylabel)
-        ax.set_title(f"DDCNN {ylabel} by View (mean±SD)")
-        # annotate bar labels
-        for p in ax.patches:
-            h = p.get_height()
-            if not np.isnan(h):
-                ax.text(
-                    p.get_x() + p.get_width() / 2,
-                    h + 0.01 * h,
-                    fmt.format(h),
-                    ha="center",
-                    va="bottom",
-                    fontsize=8,
-                )
-        plt.tight_layout()
-        fig.savefig(os.path.join(OUTPUT_DIR, f"bar_{metric}.png"), dpi=300)
-        plt.close(fig)
-
-        # ──────────────────────────────────────────────────────
-    # 4) Grouped boxplots: for each scan_type, one figure with two subplots
-    #    comparing FDK, PL, DDCNN across all slices in each view
-    # ──────────────────────────────────────────────────────
-    import matplotlib.pyplot as plt
-
-    METHODS = ["FDK", "PL", "DDCNN"]
-    # container: scan_type → method → view → list of per‐slice arrays
-    data_psnr = {st: {m: {v: [] for v in VIEWS} for m in METHODS} for st in SCAN_TYPES}
-    data_ssim = {st: {m: {v: [] for v in VIEWS} for m in METHODS} for st in SCAN_TYPES}
-    # collect metrics for every record
-    for _, row in df.iterrows():
-        stype, pid, sid, view = row.scan_type, row.patient_id, row.scan_id, row.view
-        mat_dir = os.path.join(BASE_DIR, stype)
-        # reconstruct GT and DDCNN paths
-        if stype == "FF":
-            gt_path = os.path.join(
-                mat_dir,
-                f"recon_p{pid}.{stype}{sid}.u_FDK_ROI_fullView.mat",
-            )
-            ds = 14
-        else:
-            gt_path = os.path.join(mat_dir, f"recon_p{pid}.{stype}{sid}.u_FDK_full.mat")
-            ds = 13
-        dd_path = os.path.join(
-            mat_dir,
-            f"p{pid}.{stype}{sid}_IResNet_MK6_DS{ds}.2_run{RUN}_3D.pt",
-        )
-
-        # load GT volume
-        gt_mat = loadmat(gt_path)
-        if stype == "FF":
-            gt_vol = gt_mat["u_FDK_ROI_fullView"]
-        else:
-            gt_vol = gt_mat["u_FDK_full"]
-
-        # crop slices & ROI for FF
-        gt_vol = gt_vol[..., 20:-20]
-        if stype == "FF":
-            gt_vol = gt_vol[128:-128, 128:-128]
-
-        # load DDCNN output
-        ddcnn = torch.load(dd_path, weights_only=False)
-
-        for view in VIEWS:
-            # apply view‐specific axis swap
-            gt_v = gt_vol.copy()
-            rec_v = ddcnn.copy()
-            if view == "height":
-                gt_v = np.swapaxes(gt_v, 0, 2)
-                rec_v = np.swapaxes(rec_v, 0, 2)
-            elif view == "width":
-                gt_v = np.swapaxes(gt_v, 1, 2)
-                rec_v = np.swapaxes(rec_v, 1, 2)
-
-            # mask
-            if stype == "FF":
-                mask = make_mask(gt_v, view)
-            else:
-                mask = np.ones(gt_v.shape[:2], dtype=bool)
-
-            # normalize & clip GT, FDK, PL
-            np.clip(gt_v, 0, 0.04, out=gt_v)
-            gt_v -= gt_v.min()
-            gt_v /= gt_v.max()
-            for arr in (gt_v, rec_v):
-                np.clip(arr, 0, 0.04, out=arr)
-                arr -= arr.min()
-                arr /= arr.max()
-
-            # compute per-slice metrics
-            for m, rec in zip(METHODS, (gt_v, rec_v, rec_v)):
-                data_psnr[stype][m][view].append(psnr_per_slice(gt_v, rec, mask))
-                data_ssim[stype][m][view].append(mssim_per_slice(gt_v, rec, mask))
-
-    # now plot boxplots for each scan type
-    for stype in SCAN_TYPES:
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
-        labels, box_ps, box_ss = [], [], []
-        for v in VIEWS:
-            for m in METHODS:
-                box_ps.append(np.concatenate(data_psnr[stype][m][v]))
-                box_ss.append(np.concatenate(data_ssim[stype][m][v]))
-                labels.append(f"{v}\n{m}")
-        ax1.boxplot(box_ps, labels=labels, showfliers=False)
-        ax1.set(title=f"{stype} PSNR by View & Method", ylabel="PSNR (dB)")
-        ax1.tick_params(axis="x", rotation=45)
-        ax2.boxplot(box_ss, labels=labels, showfliers=False)
-        ax2.set(title=f"{stype} SSIM by View & Method", ylabel="SSIM")
-        ax2.tick_params(axis="x", rotation=45)
-
-        plt.tight_layout()
-        fig.savefig(os.path.join(OUTPUT_DIR, f"box_grouped_{stype}.png"), dpi=300)
-        plt.close(fig)
-
-        # ──────────────────────────────────────────────────────
-    # 5) overall FF vs HF (averaged over view & patient)
-    # ──────────────────────────────────────────────────────
-    agg2 = df.groupby("scan_type")[["psnr_DDCNN", "mssim_DDCNN"]].agg(["mean", "std"])
-    # format as “val±sd”
-    summary2 = {
-        stype: {
-            "PSNR": f"{agg2.loc[stype,('psnr_DDCNN','mean')]:.1f}±{agg2.loc[stype,('psnr_DDCNN','std')]:.1f}",
-            "SSIM": f"{agg2.loc[stype,('mssim_DDCNN','mean')]:.3f}±{agg2.loc[stype,('mssim_DDCNN','std')]:.3f}",
-        }
-        for stype in SCAN_TYPES
-    }
-    df2 = pd.DataFrame.from_dict(summary2, orient="index")[["PSNR", "SSIM"]]
-    df2.to_csv(os.path.join(OUTPUT_DIR, "summary_overall.csv"))
-    with open(os.path.join(OUTPUT_DIR, "summary_overall.tex"), "w") as fh:
-        fh.write(
-            df2.to_latex(
-                escape=False,
-                caption="Overall DDCNN PSNR & SSIM (FF vs HF)",
-                label="tab:overall",
-            )
-        )
-
-        # ──────────────────────────────────────────────────────
     # LaTeX full-document output: all requested tables
     # ──────────────────────────────────────────────────────
     tex_path = os.path.join(OUTPUT_DIR, "summary.tex")
@@ -599,7 +443,7 @@ def main():
 \usepackage{graphicx}
 \usepackage{booktabs}
 \usepackage{amsmath,amssymb}
-\usepackage{underscore}      % allow _ in text
+\usepackage{underscore}
 \usepackage{hyperref}
 \hypersetup{colorlinks=true, urlcolor=blue}
 \title{DDCNN Evaluation Report}
@@ -611,110 +455,96 @@ def main():
 """
         )
 
-        # ---- 1 & 2: FF tables ----
+        # 0) Full detailed table (all scans, all views)
+        f.write(r"\section*{All Scans Detailed Metrics}" + "\n")
+        cols = [
+            "scan_type",
+            "patient_id",
+            "scan_id",
+            "view",
+            "psnr_FDK",
+            "psnr_PL",
+            "psnr_DDCNN",
+            "mssim_FDK",
+            "mssim_PL",
+            "mssim_DDCNN",
+            "psnr_FDK_tumor",
+            "psnr_PL_tumor",
+            "psnr_DDCNN_tumor",
+            "mssim_FDK_tumor",
+            "mssim_PL_tumor",
+            "mssim_DDCNN_tumor",
+        ]
+        tbl_full = df[cols].sort_values(["scan_type", "patient_id", "scan_id", "view"])
+        # format floats
+        fmt1 = lambda x: f"{x:.1f}"
+        fmt3 = lambda x: f"{x:.3f}"
+        for c in tbl_full.columns:
+            if c.startswith("psnr"):
+                tbl_full[c] = tbl_full[c].map(fmt1)
+            elif c.startswith("mssim"):
+                tbl_full[c] = tbl_full[c].map(fmt3)
+        # shrink wide table to fit page
+        f.write(r"\resizebox{\textwidth}{!}{%" + "\n")
+        f.write(
+            tbl_full.to_latex(
+                index=False,
+                escape=True,
+                caption="Per‐scan metrics by view",
+                label="tab:all_scans",
+            )
+            + "\n"
+        )
+        f.write("}%\n")
+
+        # helper to write aggregated view‐tables
+        def write_agg(section_title, df_sub, suffix):
+            f.write(r"\section*{%s}" % section_title + "\n")
+            agg = df_sub.groupby("view")[
+                [
+                    "psnr_FDK",
+                    "psnr_PL",
+                    "psnr_DDCNN",
+                    "mssim_FDK",
+                    "mssim_PL",
+                    "mssim_DDCNN",
+                ]
+            ].agg(["mean", "std"])
+            # flatten MultiIndex
+            agg.columns = [f"{m.upper()}_{met.upper()}" for m, met in agg.columns]
+            # build final table: rows=view, cols=PSNR_{mean±std}, MSSIM_{mean±std} per method
+            tbl = pd.DataFrame(index=agg.index)
+            for method in ["FDK", "PL", "DDCNN"]:
+                ps_mean = agg[f"PSNR_{method}_MEAN"]
+                ps_std = agg[f"PSNR_{method}_STD"]
+                ss_mean = agg[f"MSSIM_{method}_MEAN"]
+                ss_std = agg[f"MSSIM_{method}_STD"]
+                tbl[f"{method} PSNR"] = (
+                    ps_mean.round(1).astype(str) + "±" + ps_std.round(1).astype(str)
+                )
+                tbl[f"{method} SSIM"] = (
+                    ss_mean.round(3).astype(str) + "±" + ss_std.round(3).astype(str)
+                )
+            tbl.index.name = "View"
+            # shrink if too wide
+            f.write(r"\resizebox{\textwidth}{!}{%" + "\n")
+            f.write(
+                tbl.to_latex(
+                    escape=False,
+                    caption=suffix,
+                    label=None,
+                )
+                + "\n"
+            )
+            f.write("}%\n")
+
+        # 1 & 2: FF aggregated by view
         ff = df[df.scan_type == "FF"]
-        for suffix, desc, cols in [
-            (
-                "all",
-                "All Slices",
-                [
-                    "psnr_FDK",
-                    "psnr_PL",
-                    "psnr_DDCNN",
-                    "mssim_FDK",
-                    "mssim_PL",
-                    "mssim_DDCNN",
-                ],
-            ),
-            (
-                "tumor",
-                "Tumor Slice",
-                [
-                    "psnr_FDK_tumor",
-                    "psnr_PL_tumor",
-                    "psnr_DDCNN_tumor",
-                    "mssim_FDK_tumor",
-                    "mssim_PL_tumor",
-                    "mssim_DDCNN_tumor",
-                ],
-            ),
-        ]:
-            f.write(r"\section*{FF — Mean PSNR \& SSIM, %s}" % desc + "\n")
-            tbl = ff[["patient_id", "scan_id", "view"] + cols].sort_values(
-                ["patient_id", "scan_id", "view"]
-            )
-            # format floats
-            fmt1 = lambda x: f"{x:.1f}"
-            fmt3 = lambda x: f"{x:.3f}"
-            for c in cols:
-                if "psnr" in c:
-                    tbl[c] = tbl[c].map(fmt1)
-                else:
-                    tbl[c] = tbl[c].map(fmt3)
-            f.write(
-                tbl.to_latex(
-                    index=False,
-                    escape=True,
-                    caption=f"FF mean metrics ({desc}) by scan and view",
-                    label=f"tab:ff_{suffix}",
-                )
-                + "\n"
-            )
-
-        # ---- 3 & 4: HF tables ----
-        hf = df[df.scan_type == "HF"]
-        for suffix, desc, cols in [
-            (
-                "all",
-                "All Slices",
-                [
-                    "psnr_FDK",
-                    "psnr_PL",
-                    "psnr_DDCNN",
-                    "mssim_FDK",
-                    "mssim_PL",
-                    "mssim_DDCNN",
-                ],
-            ),
-            (
-                "tumor",
-                "Tumor Slice",
-                [
-                    "psnr_FDK_tumor",
-                    "psnr_PL_tumor",
-                    "psnr_DDCNN_tumor",
-                    "mssim_FDK_tumor",
-                    "mssim_PL_tumor",
-                    "mssim_DDCNN_tumor",
-                ],
-            ),
-        ]:
-            f.write(r"\section*{HF — Mean PSNR \& SSIM, %s}" % desc + "\n")
-            tbl = hf[["patient_id", "scan_id", "view"] + cols].sort_values(
-                ["patient_id", "scan_id", "view"]
-            )
-            fmt1 = lambda x: f"{x:.1f}"
-            fmt3 = lambda x: f"{x:.3f}"
-            for c in cols:
-                if "psnr" in c:
-                    tbl[c] = tbl[c].map(fmt1)
-                else:
-                    tbl[c] = tbl[c].map(fmt3)
-            f.write(
-                tbl.to_latex(
-                    index=False,
-                    escape=True,
-                    caption=f"HF mean metrics ({desc}) by scan and view",
-                    label=f"tab:hf_{suffix}",
-                )
-                + "\n"
-            )
-
-        # ---- 13 & 14: Overall FF aggregated ----
-        f.write(r"\section*{FF — Overall Mean Across All Scans}" + "\n")
-        agg_ff = (
+        write_agg(
+            "FF — All‐Slices Mean±SD by View",
             ff[
                 [
+                    "view",
                     "psnr_FDK",
                     "psnr_PL",
                     "psnr_DDCNN",
@@ -722,34 +552,33 @@ def main():
                     "mssim_PL",
                     "mssim_DDCNN",
                 ]
-            ]
-            .agg(["mean", "std"])
-            .T
-        )
-        agg_ff["value"] = agg_ff.apply(
-            lambda row: (
-                f"{row['mean']:.1f}±{row['std']:.1f}"
-                if row.name.startswith("psnr")
-                else f"{row['mean']:.3f}±{row['std']:.3f}"
-            ),
-            axis=1,
-        )
-        tbl_ff = agg_ff[["value"]].rename_axis("Metric").reset_index()
-        f.write(
-            tbl_ff.to_latex(
-                index=False,
-                escape=True,
-                caption="FF overall mean±SD by method",
-                label="tab:ff_overall",
-            )
-            + "\n"
+            ],
+            "FF All‐slices (mean±SD)",
         )
 
-        # ---- 15 & 16: Overall HF aggregated ----
-        f.write(r"\section*{HF — Overall Mean Across All Scans}" + "\n")
-        agg_hf = (
+        write_agg(
+            "FF — Tumor‐Slice Mean±SD by View",
+            ff[
+                [
+                    "view",
+                    "psnr_FDK_tumor",
+                    "psnr_PL_tumor",
+                    "psnr_DDCNN_tumor",
+                    "mssim_FDK_tumor",
+                    "mssim_PL_tumor",
+                    "mssim_DDCNN_tumor",
+                ]
+            ].rename(columns=lambda c: c.replace("_tumor", "")),
+            "FF Tumor slice (mean±SD)",
+        )
+
+        # 3 & 4: HF aggregated by view
+        hf = df[df.scan_type == "HF"]
+        write_agg(
+            "HF — All‐Slices Mean±SD by View",
             hf[
                 [
+                    "view",
                     "psnr_FDK",
                     "psnr_PL",
                     "psnr_DDCNN",
@@ -757,27 +586,24 @@ def main():
                     "mssim_PL",
                     "mssim_DDCNN",
                 ]
-            ]
-            .agg(["mean", "std"])
-            .T
+            ],
+            "HF All‐slices (mean±SD)",
         )
-        agg_hf["value"] = agg_hf.apply(
-            lambda row: (
-                f"{row['mean']:.1f}±{row['std']:.1f}"
-                if row.name.startswith("psnr")
-                else f"{row['mean']:.3f}±{row['std']:.3f}"
-            ),
-            axis=1,
-        )
-        tbl_hf = agg_hf[["value"]].rename_axis("Metric").reset_index()
-        f.write(
-            tbl_hf.to_latex(
-                index=False,
-                escape=True,
-                caption="HF overall mean±SD by method",
-                label="tab:hf_overall",
-            )
-            + "\n"
+
+        write_agg(
+            "HF — Tumor‐Slice Mean±SD by View",
+            hf[
+                [
+                    "view",
+                    "psnr_FDK_tumor",
+                    "psnr_PL_tumor",
+                    "psnr_DDCNN_tumor",
+                    "mssim_FDK_tumor",
+                    "mssim_PL_tumor",
+                    "mssim_DDCNN_tumor",
+                ]
+            ].rename(columns=lambda c: c.replace("_tumor", "")),
+            "HF Tumor slice (mean±SD)",
         )
 
         # document end

@@ -434,42 +434,6 @@ def main():
     df.to_csv(os.path.join(OUTPUT_DIR, "summary.csv"), index=False)
 
     # ──────────────────────────────────────────────────────
-    # 1) write separate LaTeX tables for FF vs HF (grouped by view)
-    # ──────────────────────────────────────────────────────
-    for stype, sub in df.groupby("scan_type"):
-        # aggregate mean ± std per view
-        agg = sub.groupby("view")[["psnr_DDCNN", "mssim_DDCNN"]].agg(["mean", "std"])
-
-        # format mean±std (PSNR: 1 decimal, MSSIM: 3 decimals)
-        def fmt(val, sd, metric):
-            if metric == "psnr_DDCNN":
-                return f"{val:.1f}±{sd:.1f}"
-            else:
-                return f"{val:.3f}±{sd:.3f}"
-
-        table = agg.reset_index().assign(
-            PSNR=lambda d: [
-                fmt(m, s, "psnr_DDCNN")
-                for (m, s) in zip(d[("psnr_DDCNN", "mean")], d[("psnr_DDCNN", "std")])
-            ],
-            SSIM=lambda d: [
-                fmt(m, s, "mssim_DDCNN")
-                for (m, s) in zip(d[("mssim_DDCNN", "mean")], d[("mssim_DDCNN", "std")])
-            ],
-        )[["view", "PSNR", "SSIM"]]
-
-        tex = table.to_latex(
-            index=False,
-            escape=False,
-            caption=f"{stype} – Mean DDCNN PSNR & SSIM by view",
-            label=f"tab:{stype.lower()}_by_view",
-        )
-        with open(os.path.join(OUTPUT_DIR, f"summary_{stype}.tex"), "w") as fh:
-            fh.write(r"\begin{table}[ht]\centering" + "\n")
-            fh.write(tex.replace("\\toprule", "\\toprule\n\\midrule"))
-            fh.write(r"\end{table}")
-
-        # ──────────────────────────────────────────────────────
     # 2) view-centric bar charts: mean±std for DDCNN only
     # ──────────────────────────────────────────────────────
     import matplotlib.pyplot as plt
@@ -508,33 +472,98 @@ def main():
         plt.close(fig)
 
         # ──────────────────────────────────────────────────────
-    # 4) boxplots of slice‐wise PSNR & SSIM for each scan_type
+    # 4) Grouped boxplots: for each scan_type, one figure with two subplots
+    #    comparing FDK, PL, DDCNN across all slices in each view
     # ──────────────────────────────────────────────────────
     import matplotlib.pyplot as plt
 
-    for stype in SCAN_TYPES:
-        # PSNR boxplot
-        ps_data = collect_per_slice(df, BASE_DIR, stype, psnr_per_slice)
-        fig, ax = plt.subplots(1, 1, figsize=(6, 4))
-        ax.boxplot(
-            [np.concatenate(ps_data[v]) for v in VIEWS], labels=VIEWS, showfliers=False
+    METHODS = ["FDK", "PL", "DDCNN"]
+    # container: scan_type → method → view → list of per‐slice arrays
+    data_psnr = {st: {m: {v: [] for v in VIEWS} for m in METHODS} for st in SCAN_TYPES}
+    data_ssim = {st: {m: {v: [] for v in VIEWS} for m in METHODS} for st in SCAN_TYPES}
+    # collect metrics for every record
+    for _, row in df.iterrows():
+        stype, pid, sid, view = row.scan_type, row.patient_id, row.scan_id, row.view
+        mat_dir = os.path.join(BASE_DIR, stype)
+        # reconstruct GT and DDCNN paths
+        if stype == "FF":
+            gt_path = os.path.join(
+                mat_dir,
+                f"recon_p{pid}.{stype}{sid}.u_FDK_ROI_fullView.mat",
+            )
+            ds = 14
+        else:
+            gt_path = os.path.join(mat_dir, f"recon_p{pid}.{stype}{sid}.u_FDK_full.mat")
+            ds = 13
+        dd_path = os.path.join(
+            mat_dir,
+            f"p{pid}.{stype}{sid}_IResNet_MK6_DS{ds}.2_run{RUN}_3D.pt",
         )
-        ax.set_title(f"{stype} PSNR distribution across all slices")
-        ax.set_ylabel("PSNR (dB)")
-        plt.tight_layout()
-        fig.savefig(os.path.join(OUTPUT_DIR, f"box_psnr_{stype}.png"), dpi=300)
-        plt.close(fig)
 
-        # SSIM boxplot
-        ss_data = collect_per_slice(df, BASE_DIR, stype, mssim_per_slice)
-        fig, ax = plt.subplots(1, 1, figsize=(6, 4))
-        ax.boxplot(
-            [np.concatenate(ss_data[v]) for v in VIEWS], labels=VIEWS, showfliers=False
-        )
-        ax.set_title(f"{stype} SSIM distribution across all slices")
-        ax.set_ylabel("SSIM")
+        # load GT volume
+        gt_mat = loadmat(gt_path)
+        if stype == "FF":
+            gt_vol = gt_mat["u_FDK_ROI_fullView"]
+        else:
+            gt_vol = gt_mat["u_FDK_full"]
+
+        # crop slices & ROI for FF
+        gt_vol = gt_vol[..., 20:-20]
+        if stype == "FF":
+            gt_vol = gt_vol[128:-128, 128:-128]
+
+        # load DDCNN output
+        ddcnn = torch.load(dd_path, weights_only=False)
+
+        for view in VIEWS:
+            # apply view‐specific axis swap
+            gt_v = gt_vol.copy()
+            rec_v = ddcnn.copy()
+            if view == "height":
+                gt_v = np.swapaxes(gt_v, 0, 2)
+                rec_v = np.swapaxes(rec_v, 0, 2)
+            elif view == "width":
+                gt_v = np.swapaxes(gt_v, 1, 2)
+                rec_v = np.swapaxes(rec_v, 1, 2)
+
+            # mask
+            if stype == "FF":
+                mask = make_mask(gt_v, view)
+            else:
+                mask = np.ones(gt_v.shape[:2], dtype=bool)
+
+            # normalize & clip GT, FDK, PL
+            np.clip(gt_v, 0, 0.04, out=gt_v)
+            gt_v -= gt_v.min()
+            gt_v /= gt_v.max()
+            for arr in (gt_v, rec_v):
+                np.clip(arr, 0, 0.04, out=arr)
+                arr -= arr.min()
+                arr /= arr.max()
+
+            # compute per-slice metrics
+            for m, rec in zip(METHODS, (gt_v, rec_v, rec_v)):
+                data_psnr[stype][m][view].append(psnr_per_slice(gt_v, rec, mask))
+                data_ssim[stype][m][view].append(mssim_per_slice(gt_v, rec, mask))
+
+    # now plot boxplots for each scan type
+    for stype in SCAN_TYPES:
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+        labels, box_ps, box_ss = [], [], []
+        for v in VIEWS:
+            for m in METHODS:
+                box_ps.append(np.concatenate(data_psnr[stype][m][v]))
+                box_ss.append(np.concatenate(data_ssim[stype][m][v]))
+                labels.append(f"{v}\n{m}")
+        ax1.boxplot(box_ps, labels=labels, showfliers=False)
+        ax1.set(title=f"{stype} PSNR by View & Method", ylabel="PSNR (dB)")
+        ax1.tick_params(axis="x", rotation=45)
+        ax2.boxplot(box_ss, labels=labels, showfliers=False)
+        ax2.set(title=f"{stype} SSIM by View & Method", ylabel="SSIM")
+        ax2.tick_params(axis="x", rotation=45)
+
         plt.tight_layout()
-        fig.savefig(os.path.join(OUTPUT_DIR, f"box_ssim_{stype}.png"), dpi=300)
+        fig.savefig(os.path.join(OUTPUT_DIR, f"box_grouped_{stype}.png"), dpi=300)
         plt.close(fig)
 
         # ──────────────────────────────────────────────────────
@@ -560,53 +589,199 @@ def main():
             )
         )
 
-    # LaTeX full‐document output
+        # ──────────────────────────────────────────────────────
+    # LaTeX full-document output: all requested tables
+    # ──────────────────────────────────────────────────────
     tex_path = os.path.join(OUTPUT_DIR, "summary.tex")
     with open(tex_path, "w") as f:
         f.write(
             r"""\documentclass{article}
 \usepackage{graphicx}
-\usepackage{amsmath,amssymb}
-\usepackage{amsthm}
-\usepackage{hyperref}
-\usepackage{underscore} % allow underscores in table text
-\hypersetup{colorlinks=true, urlcolor=blue, linkcolor=blue, citecolor=red}
 \usepackage{booktabs}
-
-\title{Analysis of DDCNN Performance}
+\usepackage{amsmath,amssymb}
+\usepackage{underscore}      % allow _ in text
+\usepackage{hyperref}
+\hypersetup{colorlinks=true, urlcolor=blue}
+\title{DDCNN Evaluation Report}
 \author{Noah Silverberg}
-\date{}
+\date{\today}
 
 \begin{document}
-
 \maketitle
-
-\section{Summary table}
-\begin{table}[ht]
-\caption{Mean PSNR and MSSIM across all slices and tumor slice}
-\label{tab:summary}
-\resizebox{\textwidth}{!}{%
 """
         )
-        # insert only the tabular itself
-        f.write(
-            df.to_latex(
-                index=False,
-                float_format="%.3f",
-                escape=False,  # keep underscores
-                header=True,
-                longtable=False,
+
+        # ---- 1 & 2: FF tables ----
+        ff = df[df.scan_type == "FF"]
+        for suffix, desc, cols in [
+            (
+                "all",
+                "All Slices",
+                [
+                    "psnr_FDK",
+                    "psnr_PL",
+                    "psnr_DDCNN",
+                    "mssim_FDK",
+                    "mssim_PL",
+                    "mssim_DDCNN",
+                ],
+            ),
+            (
+                "tumor",
+                "Tumor Slice",
+                [
+                    "psnr_FDK_tumor",
+                    "psnr_PL_tumor",
+                    "psnr_DDCNN_tumor",
+                    "mssim_FDK_tumor",
+                    "mssim_PL_tumor",
+                    "mssim_DDCNN_tumor",
+                ],
+            ),
+        ]:
+            f.write(r"\section*{FF — Mean PSNR \& SSIM, %s}" % desc + "\n")
+            tbl = ff[["patient_id", "scan_id", "view"] + cols].sort_values(
+                ["patient_id", "scan_id", "view"]
             )
-        )
-        # finish the document
-        f.write(
-            r"""%
-} % end resizebox
-\end{table}
+            # format floats
+            fmt1 = lambda x: f"{x:.1f}"
+            fmt3 = lambda x: f"{x:.3f}"
+            for c in cols:
+                if "psnr" in c:
+                    tbl[c] = tbl[c].map(fmt1)
+                else:
+                    tbl[c] = tbl[c].map(fmt3)
+            f.write(
+                tbl.to_latex(
+                    index=False,
+                    escape=True,
+                    caption=f"FF mean metrics ({desc}) by scan and view",
+                    label=f"tab:ff_{suffix}",
+                )
+                + "\n"
+            )
 
-\end{document}
-"""
+        # ---- 3 & 4: HF tables ----
+        hf = df[df.scan_type == "HF"]
+        for suffix, desc, cols in [
+            (
+                "all",
+                "All Slices",
+                [
+                    "psnr_FDK",
+                    "psnr_PL",
+                    "psnr_DDCNN",
+                    "mssim_FDK",
+                    "mssim_PL",
+                    "mssim_DDCNN",
+                ],
+            ),
+            (
+                "tumor",
+                "Tumor Slice",
+                [
+                    "psnr_FDK_tumor",
+                    "psnr_PL_tumor",
+                    "psnr_DDCNN_tumor",
+                    "mssim_FDK_tumor",
+                    "mssim_PL_tumor",
+                    "mssim_DDCNN_tumor",
+                ],
+            ),
+        ]:
+            f.write(r"\section*{HF — Mean PSNR \& SSIM, %s}" % desc + "\n")
+            tbl = hf[["patient_id", "scan_id", "view"] + cols].sort_values(
+                ["patient_id", "scan_id", "view"]
+            )
+            fmt1 = lambda x: f"{x:.1f}"
+            fmt3 = lambda x: f"{x:.3f}"
+            for c in cols:
+                if "psnr" in c:
+                    tbl[c] = tbl[c].map(fmt1)
+                else:
+                    tbl[c] = tbl[c].map(fmt3)
+            f.write(
+                tbl.to_latex(
+                    index=False,
+                    escape=True,
+                    caption=f"HF mean metrics ({desc}) by scan and view",
+                    label=f"tab:hf_{suffix}",
+                )
+                + "\n"
+            )
+
+        # ---- 13 & 14: Overall FF aggregated ----
+        f.write(r"\section*{FF — Overall Mean Across All Scans}" + "\n")
+        agg_ff = (
+            ff[
+                [
+                    "psnr_FDK",
+                    "psnr_PL",
+                    "psnr_DDCNN",
+                    "mssim_FDK",
+                    "mssim_PL",
+                    "mssim_DDCNN",
+                ]
+            ]
+            .agg(["mean", "std"])
+            .T
         )
+        agg_ff["value"] = agg_ff.apply(
+            lambda row: (
+                f"{row['mean']:.1f}±{row['std']:.1f}"
+                if row.name.startswith("psnr")
+                else f"{row['mean']:.3f}±{row['std']:.3f}"
+            ),
+            axis=1,
+        )
+        tbl_ff = agg_ff[["value"]].rename_axis("Metric").reset_index()
+        f.write(
+            tbl_ff.to_latex(
+                index=False,
+                escape=True,
+                caption="FF overall mean±SD by method",
+                label="tab:ff_overall",
+            )
+            + "\n"
+        )
+
+        # ---- 15 & 16: Overall HF aggregated ----
+        f.write(r"\section*{HF — Overall Mean Across All Scans}" + "\n")
+        agg_hf = (
+            hf[
+                [
+                    "psnr_FDK",
+                    "psnr_PL",
+                    "psnr_DDCNN",
+                    "mssim_FDK",
+                    "mssim_PL",
+                    "mssim_DDCNN",
+                ]
+            ]
+            .agg(["mean", "std"])
+            .T
+        )
+        agg_hf["value"] = agg_hf.apply(
+            lambda row: (
+                f"{row['mean']:.1f}±{row['std']:.1f}"
+                if row.name.startswith("psnr")
+                else f"{row['mean']:.3f}±{row['std']:.3f}"
+            ),
+            axis=1,
+        )
+        tbl_hf = agg_hf[["value"]].rename_axis("Metric").reset_index()
+        f.write(
+            tbl_hf.to_latex(
+                index=False,
+                escape=True,
+                caption="HF overall mean±SD by method",
+                label="tab:hf_overall",
+            )
+            + "\n"
+        )
+
+        # document end
+        f.write(r"\end{document}" + "\n")
 
     print("Done! Outputs in", OUTPUT_DIR)
 

@@ -287,7 +287,7 @@ def main():
         else:
             patt = os.path.join(mat_dir, f"recon_p*.{scan_type}??.u_FDK_full.mat")
 
-        for gt_path in glob.glob(patt)[:2]:  # TODO remove [:2]
+        for gt_path in glob.glob(patt):
             # extract patient & scan IDs: recon_p{pid}.{type}{sid}.*
             base = os.path.basename(gt_path)
             pid = base.split(".")[0].split("p")[1]
@@ -386,22 +386,22 @@ def main():
                 odir = os.path.join(OUTPUT_DIR, f"{scan_type}_p{pid}_{sid}_{view}")
                 os.makedirs(odir, exist_ok=True)
 
-                # # 1) SSIM map # TODO uncomment these plots
-                # save_ssim_map(
-                #     gt,
-                #     [fdk_v, pl_v, dd_v],
-                #     ["FDK", "PL", "DDCNN"],
-                #     mask,
-                #     tumor_slice,
-                #     (t[1], t[0]),
-                #     os.path.join(odir, "SSIM_map.png"),
-                #     scan_type,
-                # )
+                # 1) SSIM map
+                save_ssim_map(
+                    gt,
+                    [fdk_v, pl_v, dd_v],
+                    ["FDK", "PL", "DDCNN"],
+                    mask,
+                    tumor_slice,
+                    (t[1], t[0]),
+                    os.path.join(odir, "SSIM_map.png"),
+                    scan_type,
+                )
 
-                # # 2) PSNR/MSSIM curves
-                # save_psnr_mssim_plot(
-                #     gt, fdk_v, pl_v, dd_v, mask, os.path.join(odir, "PSNR_MSSIM.png")
-                # )
+                # 2) PSNR/MSSIM curves
+                save_psnr_mssim_plot(
+                    gt, fdk_v, pl_v, dd_v, mask, os.path.join(odir, "PSNR_MSSIM.png")
+                )
 
                 # 3) summary metrics
                 ps_all = {}

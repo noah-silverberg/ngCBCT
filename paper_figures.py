@@ -5,6 +5,7 @@ from scipy.io import loadmat
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 
 # -----------------------------------------------------------------------------
 # CONFIG
@@ -202,16 +203,16 @@ def plot_scan(scan_type, pid, sid):
     # cols are 0…5; col 0 is gated, cols 1–5 are nonstop gated
     fig.text(
         x=(0 + 0.5) / ncols,
-        y=0.95,
+        y=0.94,
         s="Gated CBCT",
         color="white",
         weight="bold",
         ha="center",
-        fontsize=20,
+        fontsize=24,
     )
     fig.text(
         x=(1 + 5 + 1) / 2 / ncols,
-        y=0.95,  # midpoint of cols 1–5
+        y=0.94,  # midpoint of cols 1–5
         s="Nonstop Gated CBCT",
         color="white",
         weight="bold",
@@ -253,7 +254,7 @@ def plot_scan(scan_type, pid, sid):
             ax = axes[i, j]
             ax.text(
                 0.02,
-                0.98,  # small inset from top‐left
+                0.97,  # small inset from top‐left
                 labels[k],
                 color="white",
                 weight="bold",
@@ -264,6 +265,38 @@ def plot_scan(scan_type, pid, sid):
             )
             k += 1
     # ──────────────────────────────────────────────────────────────────────────
+
+    # ─── draw dashed box around the first (gated) column ─────────────────────────
+    # halfway between title baseline and top of figure:
+    y_top = 0.99
+
+    # get bottom edge of the bottom gated subplot:
+    ax_bl = axes[-1, 0]
+    pos_bl = ax_bl.get_position()
+    y_bot = pos_bl.y0
+
+    # halfway between bottom subplot and bottom of figure:
+    y_bottom = y_bot / 2.0
+
+    # left edge and width of the gated column (unchanged):
+    ax_tl = axes[0, 0]
+    pos_tl = ax_tl.get_position()
+    x0 = pos_tl.x0
+    width = pos_tl.width
+
+    # draw the dashed box from y_bottom up to y_top:
+    rect = patches.Rectangle(
+        (x0, y_bottom),
+        width,
+        y_top - y_bottom,
+        transform=fig.transFigure,
+        fill=False,
+        edgecolor="white",
+        linestyle="--",
+        linewidth=2,
+    )
+    fig.patches.append(rect)
+    # ─────────────────────────────────────────────────────────────────────────────
 
     outname = f"{scan_type}_p{pid}_{sid}.png"
     os.makedirs(OUTPUT_DIR, exist_ok=True)

@@ -58,6 +58,36 @@ SUBPLOTS = {
     },
 }
 
+# per‐scan, per‐view arrow customization:
+# keys are (scan_type, pid, sid), values are dicts mapping view→params
+# params:
+#   tail_dx, tail_dy : shifts in pixels from tumor to arrow tail
+#   lw               : line width of arrow
+#   tip_dx, tip_dy   : additional x/y translation of the head (if desired)
+ARROW_PARAMS = {
+    ("HF", "20", "01"): {
+        "index": {"tail_dx": 50, "tail_dy": -50, "tip_dx": 7, "tip_dy": -7, "lw": 3},
+        "width": {"tail_dx": 35, "tail_dy": -40, "tip_dx": 4, "tip_dy": -4, "lw": 3},
+        "height": {"tail_dx": 35, "tail_dy": -45, "tip_dx": 3, "tip_dy": -3, "lw": 3},
+    },
+    ("HF", "14", "01"): {
+        "index": {"tail_dx": 45, "tail_dy": -60, "tip_dx": 15, "tip_dy": -22, "lw": 3},
+        "width": {"tail_dx": 30, "tail_dy": -56, "tip_dx": 10, "tip_dy": -30, "lw": 3},
+        "height": {"tail_dx": 48, "tail_dy": -52, "tip_dx": 18, "tip_dy": -17, "lw": 3},
+    },
+    ("FF", "22", "01"): {
+        "index": {"tail_dx": -32, "tail_dy": -30, "tip_dx": -7, "tip_dy": -2, "lw": 3},
+        "width": {"tail_dx": -25, "tail_dy": -29, "tip_dx": -2, "tip_dy": -7, "lw": 3},
+        "height": {
+            "tail_dx": -30,
+            "tail_dy": -34,
+            "tip_dx": -5,
+            "tip_dy": -10,
+            "lw": 3,
+        },
+    },
+}
+
 VIEWS = ["index", "width", "height"]
 METHODS = [
     ("u_FDK", "FDK"),
@@ -232,7 +262,7 @@ def plot_scan(scan_type, pid, sid):
 
             ax.imshow(sl, cmap="gray", vmin=0, vmax=1)
 
-            # ─── arrow pointing to tumor in the GT (first) column ───────────
+            # ─── arrow pointing to tumor in the GT (first) column using ARROW_PARAMS ───────────
             if j == 0:
                 # determine tumor pixel coords for this view
                 if view == "index":
@@ -244,22 +274,33 @@ def plot_scan(scan_type, pid, sid):
                     # for height‐view we swapaxes(0,2) so x=orig x, y=orig z
                     ty, tx = tloc[2], tloc[1]
 
-                # adjust for any crop you applied
+                # adjust for crop
                 crop = CROPS.get((scan_type, pid, sid), {}).get(view)
                 if crop is not None:
                     y0, y1, x0, x1 = crop
                     ty -= y0
                     tx -= x0
 
+                # pull params (or use defaults)
+                cfg = ARROW_PARAMS.get((scan_type, pid, sid), {}).get(
+                    view,
+                    {"tail_dx": 30, "tail_dy": 30, "tip_dx": 0, "tip_dy": 0, "lw": 3},
+                )
+                tail_dx = cfg["tail_dx"]
+                tail_dy = cfg["tail_dy"]
+                tip_dx = cfg["tip_dx"]
+                tip_dy = cfg["tip_dy"]
+                lw = cfg["lw"]
+
                 # draw arrow
                 ax.annotate(
                     "",
-                    xy=(tx, ty),
-                    xytext=(tx + 30, ty + 30),
+                    xy=(tx + tip_dx, ty + tip_dy),  # arrow head at tumor (+ tip shift)
+                    xytext=(tx + tail_dx, ty + tail_dy),  # tail position
                     arrowprops=dict(
                         color="white",
                         arrowstyle="->",
-                        lw=3,
+                        lw=lw,
                     ),
                 )
             # ────────────────────────────────────────────────────────────────
@@ -333,7 +374,7 @@ def plot_scan(scan_type, pid, sid):
 
     outname = f"{scan_type}_p{pid}_{sid}.png"
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    fig.savefig(os.path.join(OUTPUT_DIR, outname), dpi=200)  # TODO
+    fig.savefig(os.path.join(OUTPUT_DIR, outname), dpi=400)
     plt.close(fig)
     print("Saved", outname)
 

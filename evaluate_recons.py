@@ -417,27 +417,24 @@ def main():
                     ms = mssim_per_slice(gt, arr, mask)
                     ps_all[name] = np.nanmean(ps)
                     ms_all[name] = np.nanmean(ms)
-                # tumor slice only
+
+                    # compute mean metrics over ±10 and ±20 slices around tumor
+                    start_10 = max(0, tumor_slice - 10)
+                    end_10 = min(gt.shape[2], tumor_slice + 10 + 1)
+                    start_20 = max(0, tumor_slice - 20)
+                    end_20 = min(gt.shape[2], tumor_slice + 20 + 1)
+                    ps_all[f"{name}_around10"] = np.nanmean(ps[start_10:end_10])
+                    ps_all[f"{name}_around20"] = np.nanmean(ps[start_20:end_20])
+                    ms_all[f"{name}_around10"] = np.nanmean(ms[start_10:end_10])
+                    ms_all[f"{name}_around20"] = np.nanmean(ms[start_20:end_20])
 
                 # (done) TODO subtract 20 from all index for tumor location (HF and FF)
                 # (done) TODO transpose the "width" view images
                 # (done) TODO exclude FF 16 scan 01
+                # (done) TODO also make 3 more tables, with 20 slices around tumor (10 on each side)
+                # (done) TODO also make 3 more tables, with 40 slices around tumor (20 on each side)
 
-                # TODO also make 3 more tables, with 20 slices around tumor (10 on each side)
-                # TODO also make 3 more tables, with 40 slices around tumor (20 on each side)
                 # TODO redo paper figures (black background)
-                recs = dict(
-                    FDK=fdk_v,
-                    PL=pl_v,
-                    FBPCONVNet=fbpcnn_v,
-                    IResNet=iresnet_v,
-                    DDCNN=dd_v,
-                )
-                for name, arr in recs.items():
-                    ps_all[f"{name}_tumor"] = psnr_per_slice(gt, arr, mask)[tumor_slice]
-                    ms_all[f"{name}_tumor"] = mssim_per_slice(gt, arr, mask)[
-                        tumor_slice
-                    ]
 
                 rec = {
                     "scan_type": scan_type,
@@ -483,7 +480,7 @@ def main():
             ("IResNet", "IResNet"),
             ("DDCNN", "DDCNN"),
         ]
-
+        # 1) full‐volume tables (existing)
         for view in VIEWS:
             # subset for this view
             sub = df[df["view"] == view]
@@ -534,7 +531,46 @@ def main():
             )
             f.write(r"\label{tab:" + view + "_fan}" + "\n")
             f.write(r"\end{table}" + "\n\n")
-
+        # 2) tables for ±10 and ±20 slices around tumor
+        windows = [("±10", "around10"), ("±20", "around20")]
+        for w_label, col_suffix in windows:
+            for view in VIEWS:
+                sub = df[df["view"] == view]
+                agg = sub.groupby("scan_type").agg(
+                    {
+                        **{f"psnr_{key}_{col_suffix}": "mean" for key, _ in methods},
+                        **{f"mssim_{key}_{col_suffix}": "mean" for key, _ in methods},
+                    }
+                )
+                f.write(r"\begin{table}[ht]\centering" + "\n")
+                f.write(r"\resizebox{\textwidth}{!}{%" + "\n")
+                f.write(r"\begin{tabular}{l | cc | cc}" + "\n")
+                f.write(r"\toprule" + "\n")
+                f.write(
+                    r"Method & \multicolumn{2}{c}{Half-Fan} & \multicolumn{2}{c}{Full-Fan} \\"
+                    + "\n"
+                )
+                f.write(r" & PSNR & SSIM & PSNR & SSIM \\" + "\n")
+                f.write(r"\midrule" + "\n")
+                for key, label in methods:
+                    hf_ps = agg.loc["HF", f"psnr_{key}_{col_suffix}"]
+                    hf_ss = agg.loc["HF", f"mssim_{key}_{col_suffix}"]
+                    ff_ps = agg.loc["FF", f"psnr_{key}_{col_suffix}"]
+                    ff_ss = agg.loc["FF", f"mssim_{key}_{col_suffix}"]
+                    f.write(
+                        f"{label} & {hf_ps:.2f} & {hf_ss:.2f} & {ff_ps:.2f} & {ff_ss:.2f} \\\\\n"
+                    )
+                f.write(r"\bottomrule" + "\n")
+                f.write(r"\end{tabular}%" + "\n")
+                f.write(r"}" + "\n")
+                f.write(
+                    r"\caption{"
+                    + f"{view.capitalize()} view: PSNR \\& SSIM by method and fan type for tumor surrounding {w_label} slices"
+                    + "}"
+                    + "\n"
+                )
+                f.write(r"\label{tab:" + view + "_" + col_suffix + "}" + "\n")
+                f.write(r"\end{table}" + "\n\n")
         f.write(r"\end{document}" + "\n")
 
     print("LaTeX written to", tex_path)

@@ -255,6 +255,10 @@ def main():
             pid = base.split(".")[0].split("p")[1]
             sid = base.split(".")[1][len(scan_type) :]
 
+            if scan_type == "FF" and pid == "16" and sid == "01":
+                print(f"Skipping FF scan 16.01")
+                continue
+
             # load all mats
             if scan_type == "FF":
                 fdk_path = gt_path.replace("FDK_ROI_fullView", "FDK_ROI")
@@ -417,11 +421,11 @@ def main():
 
                 # (done) TODO subtract 20 from all index for tumor location (HF and FF)
                 # (done) TODO transpose the "width" view images
+                # (done) TODO exclude FF 16 scan 01
 
                 # TODO also make 3 more tables, with 20 slices around tumor (10 on each side)
                 # TODO also make 3 more tables, with 40 slices around tumor (20 on each side)
                 # TODO redo paper figures (black background)
-                # TODO exclude FF 16 scan 01
                 recs = dict(
                     FDK=fdk_v,
                     PL=pl_v,

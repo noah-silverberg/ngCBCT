@@ -329,6 +329,8 @@ def main():
             if scan_type == "FF":
                 tloc[:2] -= 128
 
+            tloc[2] -= 20  # adjust for slice trimming
+
             for view in VIEWS:
                 # apply axis-swaps
                 gt = gt_vol.copy()
@@ -346,10 +348,10 @@ def main():
                     t = np.array([t[2], t[1], t[0]])
                 elif view == "width":
                     gt, fdk_v, pl_v, dd_v, fbpcnn_v, iresnet_v = [
-                        np.swapaxes(x, 1, 2)
+                        np.transpose(x, (2, 0, 1))
                         for x in (gt, fdk_v, pl_v, dd_v, fbpcnn_v, iresnet_v)
                     ]
-                    t = np.array([t[0], t[2], t[1]])
+                    t = np.array([t[2], t[0], t[1]])
 
                 # use mask only for FF scans; otherwise full-true
                 if scan_type == "FF":
@@ -412,6 +414,14 @@ def main():
                     ps_all[name] = np.nanmean(ps)
                     ms_all[name] = np.nanmean(ms)
                 # tumor slice only
+
+                # (done) TODO subtract 20 from all index for tumor location (HF and FF)
+                # (done) TODO transpose the "width" view images
+
+                # TODO also make 3 more tables, with 20 slices around tumor (10 on each side)
+                # TODO also make 3 more tables, with 40 slices around tumor (20 on each side)
+                # TODO redo paper figures (black background)
+                # TODO exclude FF 16 scan 01
                 recs = dict(
                     FDK=fdk_v,
                     PL=pl_v,

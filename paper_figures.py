@@ -33,9 +33,27 @@ CROPS = {
         "height": (0, 160 - 0, 85, 512 - 95),
     },
     ("FF", "22", "01"): {
-        "index": (5, 256 - 40, 0, 256 - 0),
+        "index": (5, 256 - 45, 0, 256 - 0),
         "width": (0, 160 - 0, 15, 256 - 53),
         "height": (0, 160 - 0, 8, 256 - 9),
+    },
+}
+
+SUBPLOTS = {
+    ("HF", "20", "01"): {
+        "top": 0.85,
+        "hspace": 0.05,
+        "height_factor": 3.7,
+    },
+    ("HF", "14", "01"): {
+        "top": 0.88,
+        "hspace": 0.01,
+        "height_factor": 3.5,
+    },
+    ("FF", "22", "01"): {
+        "top": 0.90,
+        "hspace": 0.05,
+        "height_factor": 3.4,
     },
 }
 
@@ -151,11 +169,54 @@ def plot_scan(scan_type, pid, sid):
     gt, fdk, pl, ddcnn, fbpcnn, ire, tloc = load_gt_and_recons(scan_type, pid, sid)
     vols = [gt, fdk, pl, ddcnn, fbpcnn, ire]
     # rename METHODS to match vols order:
-    names = ["FDK (Gated)", "FDK", "IR", "FBPCONVNet", "IResNet", "DDCNN"]
+    names = ["FDK", "FDK", "IR", "FBPCONVNet", "IResNet", "DDCNN"]
     ncols = len(names)
     nrows = len(VIEWS)
+    # Calculate heights so that each view fills the full horizontal space
+    # use the CROPS dict
+    heights = []
+    for view in VIEWS:
+        crop = CROPS.get((scan_type, pid, sid), {}).get(view)
+        if crop is not None:
+            y0, y1, x0, x1 = crop
+            height = (y1 - y0) / (x1 - x0)
+            heights.append(height)
+        else:
+            heights.append(1.0)
+
     fig, axes = plt.subplots(
-        nrows, ncols, figsize=(3 * ncols, 3 * nrows), squeeze=False
+        nrows,
+        ncols,
+        figsize=(
+            3 * ncols,
+            sum(heights)
+            * SUBPLOTS.get((scan_type, pid, sid), {}).get("height_factor", 3.5),
+        ),
+        squeeze=False,
+        facecolor="black",
+        gridspec_kw={"height_ratios": heights},
+    )
+    fig.patch.set_facecolor("black")
+
+    # add the two big titles in white, centered over the appropriate columns
+    # cols are 0…5; col 0 is gated, cols 1–5 are nonstop gated
+    fig.text(
+        x=(0 + 0.5) / ncols,
+        y=0.95,
+        s="Gated CBCT",
+        color="white",
+        weight="bold",
+        ha="center",
+        fontsize=20,
+    )
+    fig.text(
+        x=(1 + 5 + 1) / 2 / ncols,
+        y=0.95,  # midpoint of cols 1–5
+        s="Nonstop Gated CBCT",
+        color="white",
+        weight="bold",
+        ha="center",
+        fontsize=20,
     )
     for i, view in enumerate(VIEWS):
         slices = extract_view(vols, tloc, view)
@@ -170,12 +231,22 @@ def plot_scan(scan_type, pid, sid):
 
             ax.imshow(sl, cmap="gray", vmin=0, vmax=1)
             if i == 0:
-                ax.set_title(names[j], fontsize=12)
+                ax.set_title(names[j], fontsize=16, color="white", weight="bold")
             ax.axis("off")
-    plt.tight_layout()
+
+    # tighten up margins so images butt right up against each other
+    fig.subplots_adjust(
+        left=0.01,
+        right=0.99,
+        top=SUBPLOTS.get((scan_type, pid, sid), {}).get("top", 0.9),
+        bottom=0.02,
+        wspace=0.01,
+        hspace=SUBPLOTS.get((scan_type, pid, sid), {}).get("hspace", 0.05),
+    )
+
     outname = f"{scan_type}_p{pid}_{sid}.png"
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    fig.savefig(os.path.join(OUTPUT_DIR, outname), dpi=400)
+    fig.savefig(os.path.join(OUTPUT_DIR, outname), dpi=200)  # TODO
     plt.close(fig)
     print("Saved", outname)
 

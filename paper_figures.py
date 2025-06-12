@@ -51,7 +51,7 @@ SUBPLOTS = {
         "height_factor": 3.5,
     },
     ("FF", "22", "01"): {
-        "top": 0.90,
+        "top": 0.88,
         "hspace": 0.05,
         "height_factor": 3.4,
     },
@@ -216,7 +216,7 @@ def plot_scan(scan_type, pid, sid):
         color="white",
         weight="bold",
         ha="center",
-        fontsize=20,
+        fontsize=24,
     )
     for i, view in enumerate(VIEWS):
         slices = extract_view(vols, tloc, view)
@@ -231,7 +231,7 @@ def plot_scan(scan_type, pid, sid):
 
             ax.imshow(sl, cmap="gray", vmin=0, vmax=1)
             if i == 0:
-                ax.set_title(names[j], fontsize=16, color="white", weight="bold")
+                ax.set_title(names[j], fontsize=20, color="white", weight="bold")
             ax.axis("off")
 
     # tighten up margins so images butt right up against each other
@@ -243,6 +243,27 @@ def plot_scan(scan_type, pid, sid):
         wspace=0.01,
         hspace=SUBPLOTS.get((scan_type, pid, sid), {}).get("hspace", 0.05),
     )
+
+    # ─── add subplot letter labels a)–r) ────────────────────────────────────────
+    # total subplots = nrows * ncols
+    labels = [f"{chr(ord('a') + k)})" for k in range(nrows * ncols)]
+    k = 0
+    for i in range(nrows):
+        for j in range(ncols):
+            ax = axes[i, j]
+            ax.text(
+                0.02,
+                0.98,  # small inset from top‐left
+                labels[k],
+                color="white",
+                weight="bold",
+                fontsize=16,
+                va="top",
+                ha="left",
+                transform=ax.transAxes,
+            )
+            k += 1
+    # ──────────────────────────────────────────────────────────────────────────
 
     outname = f"{scan_type}_p{pid}_{sid}.png"
     os.makedirs(OUTPUT_DIR, exist_ok=True)

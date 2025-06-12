@@ -198,7 +198,7 @@ def extract_view(vols, tloc, view):
 
 def plot_scan(scan_type, pid, sid):
     gt, fdk, pl, ddcnn, fbpcnn, ire, tloc = load_gt_and_recons(scan_type, pid, sid)
-    vols = [gt, fdk, pl, ddcnn, fbpcnn, ire]
+    vols = [gt, fdk, pl, fbpcnn, ire, ddcnn]
     # rename METHODS to match vols order:
     names = ["FDK", "FDK", "IR", "FBPCONVNet", "IResNet", "DDCNN"]
     ncols = len(names)

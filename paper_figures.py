@@ -231,6 +231,39 @@ def plot_scan(scan_type, pid, sid):
                 sl = sl[y0:y1, x0:x1]
 
             ax.imshow(sl, cmap="gray", vmin=0, vmax=1)
+
+            # ─── arrow pointing to tumor in the GT (first) column ───────────
+            if j == 0:
+                # determine tumor pixel coords for this view
+                if view == "index":
+                    ty, tx = tloc[0], tloc[1]
+                elif view == "width":
+                    # for width‐view we transposed (2,0,1) so x=orig y, y=orig z
+                    ty, tx = tloc[2], tloc[0]
+                else:  # height
+                    # for height‐view we swapaxes(0,2) so x=orig x, y=orig z
+                    ty, tx = tloc[2], tloc[1]
+
+                # adjust for any crop you applied
+                crop = CROPS.get((scan_type, pid, sid), {}).get(view)
+                if crop is not None:
+                    y0, y1, x0, x1 = crop
+                    ty -= y0
+                    tx -= x0
+
+                # draw arrow
+                ax.annotate(
+                    "",
+                    xy=(tx, ty),
+                    xytext=(tx + 30, ty + 30),
+                    arrowprops=dict(
+                        color="white",
+                        arrowstyle="->",
+                        lw=3,
+                    ),
+                )
+            # ────────────────────────────────────────────────────────────────
+
             if i == 0:
                 ax.set_title(names[j], fontsize=20, color="white", weight="bold")
             ax.axis("off")

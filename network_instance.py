@@ -933,12 +933,13 @@ class IResNetEvidential(nn.Module):
 
 
 class SingleConvDropout(nn.Module):
-    def __init__(self, ch_in, ch_out):
+    def __init__(self, ch_in, ch_out, p=0.2):
         super(SingleConvDropout, self).__init__()
         self.conv = nn.Sequential(
             nn.Conv2d(ch_in, ch_out, kernel_size=3, stride=1, padding=1, bias=True),
             nn.InstanceNorm2d(ch_out),
             nn.ReLU(inplace=True),
+            nn.Dropout2d(p=p),
         )
 
     def forward(self, x):
@@ -947,15 +948,17 @@ class SingleConvDropout(nn.Module):
 
 
 class ConvBlockDropout(nn.Module):
-    def __init__(self, ch_in, ch_out):
+    def __init__(self, ch_in, ch_out, p=0.2):
         super(ConvBlockDropout, self).__init__()
         self.conv = nn.Sequential(
             nn.Conv2d(ch_in, ch_out, kernel_size=3, stride=1, padding=1, bias=True),
             nn.InstanceNorm2d(ch_out),
             nn.ReLU(inplace=True),
+            nn.Dropout2d(p=p),
             nn.Conv2d(ch_out, ch_out, kernel_size=3, stride=1, padding=1, bias=True),
             nn.InstanceNorm2d(ch_out),
             nn.ReLU(inplace=True),
+            nn.Dropout2d(p=p),
         )
 
     def forward(self, x):
@@ -964,7 +967,7 @@ class ConvBlockDropout(nn.Module):
 
 
 class UpConvBlockDropout(nn.Module):
-    def __init__(self, ch_in, ch_out, up_conv):
+    def __init__(self, ch_in, ch_out, up_conv, p=0.2):
         super(UpConvBlockDropout, self).__init__()
 
         if up_conv:
@@ -974,6 +977,7 @@ class UpConvBlockDropout(nn.Module):
                 ),
                 nn.InstanceNorm2d(ch_out),
                 nn.ReLU(inplace=True),
+                nn.Dropout2d(p=p),
             )
 
         else:
@@ -982,6 +986,7 @@ class UpConvBlockDropout(nn.Module):
                 nn.Conv2d(ch_in, ch_out, kernel_size=3, stride=1, padding=1, bias=True),
                 nn.InstanceNorm2d(ch_out),
                 nn.ReLU(inplace=True),
+                nn.Dropout2d(p=p),
             )
 
     def forward(self, x):
@@ -991,7 +996,7 @@ class UpConvBlockDropout(nn.Module):
 
 class ResidualBlock_modDropout(nn.Module):
     # ReflectionPad and InstanceNorm
-    def __init__(self, ch_in):
+    def __init__(self, ch_in, p=0.2):
         super(ResidualBlock_modDropout, self).__init__()
 
         self.block = nn.Sequential(
@@ -1000,11 +1005,13 @@ class ResidualBlock_modDropout(nn.Module):
             nn.Conv2d(ch_in, ch_in, 3),
             nn.InstanceNorm2d(ch_in),
             nn.ReLU(inplace=True),
+            nn.Dropout2d(p=p),
             nn.ReflectionPad2d(1),
             nn.Conv2d(ch_in, ch_in, 3),
             nn.InstanceNorm2d(ch_in),
+            nn.Dropout2d(p=p),
         )
-        self.relu = nn.Sequential(nn.ReLU(inplace=True))
+        self.relu = nn.Sequential(nn.ReLU(inplace=True), nn.Dropout2d(p=p))
 
     def forward(self, x):
         y = x + self.block(x)
@@ -1014,31 +1021,31 @@ class ResidualBlock_modDropout(nn.Module):
 
 class IResNetDropout(nn.Module):
 
-    def __init__(self, img_ch=1, output_ch=1):
+    def __init__(self, img_ch=1, output_ch=1, p=0.2):
         super(IResNetDropout, self).__init__()
 
         up_conv = True
 
         self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
 
-        self.conv1 = ConvBlockDropout(ch_in=img_ch, ch_out=64)
-        self.conv1_extra = SingleConvDropout(ch_in=64, ch_out=64)
-        self.conv2 = ConvBlockDropout(ch_in=64, ch_out=128)
-        self.conv3 = ConvBlockDropout(ch_in=128, ch_out=256)
-        self.conv4 = ConvBlockDropout(ch_in=256, ch_out=512)
-        self.conv5 = ConvBlockDropout(ch_in=512, ch_out=1024)
+        self.conv1 = ConvBlockDropout(ch_in=img_ch, ch_out=64, p=p)
+        self.conv1_extra = SingleConvDropout(ch_in=64, ch_out=64, p=p)
+        self.conv2 = ConvBlockDropout(ch_in=64, ch_out=128, p=p)
+        self.conv3 = ConvBlockDropout(ch_in=128, ch_out=256, p=p)
+        self.conv4 = ConvBlockDropout(ch_in=256, ch_out=512, p=p)
+        self.conv5 = ConvBlockDropout(ch_in=512, ch_out=1024, p=p)
 
-        self.resnet = ResidualBlock_modDropout(ch_in=1024)
+        self.resnet = ResidualBlock_modDropout(ch_in=1024, p=p)
         # self.resnet = ResidualBlock(ch_in=1024)
 
-        self.up5 = UpConvBlockDropout(ch_in=1024, ch_out=512, up_conv=up_conv)
-        self.up_conv5 = ConvBlockDropout(ch_in=1024, ch_out=512)
-        self.up4 = UpConvBlockDropout(ch_in=512, ch_out=256, up_conv=up_conv)
-        self.up_conv4 = ConvBlockDropout(ch_in=512, ch_out=256)
-        self.up3 = UpConvBlockDropout(ch_in=256, ch_out=128, up_conv=up_conv)
-        self.up_conv3 = ConvBlockDropout(ch_in=256, ch_out=128)
-        self.up2 = UpConvBlockDropout(ch_in=128, ch_out=64, up_conv=up_conv)
-        self.up_conv2 = ConvBlockDropout(ch_in=128, ch_out=64)
+        self.up5 = UpConvBlockDropout(ch_in=1024, ch_out=512, up_conv=up_conv, p=p)
+        self.up_conv5 = ConvBlockDropout(ch_in=1024, ch_out=512, p=p)
+        self.up4 = UpConvBlockDropout(ch_in=512, ch_out=256, up_conv=up_conv, p=p)
+        self.up_conv4 = ConvBlockDropout(ch_in=512, ch_out=256, p=p)
+        self.up3 = UpConvBlockDropout(ch_in=256, ch_out=128, up_conv=up_conv, p=p)
+        self.up_conv3 = ConvBlockDropout(ch_in=256, ch_out=128, p=p)
+        self.up2 = UpConvBlockDropout(ch_in=128, ch_out=64, up_conv=up_conv, p=p)
+        self.up_conv2 = ConvBlockDropout(ch_in=128, ch_out=64, p=p)
 
         self.conv_1x1 = nn.Conv2d(64, output_ch, kernel_size=1, stride=1, padding=0)
 

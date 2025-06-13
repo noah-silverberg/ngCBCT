@@ -110,11 +110,10 @@ class TrainingApp:
             type=float,
         )
         parser.add_argument(
-            "--lambda_values",
-            help="List of lambda values for the evidential loss (e.g. 1e-4 1e-3 1e-2)",
-            nargs="+",
+            "--lambda_value",
+            help="Regularization constant value for the evidential loss (e.g. 1e-4)",
             type=float,
-            default=[1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 1e-1],
+            default=1e-3,
         )
 
         parser.add_argument("--model_dir", type=str, default="./model/")
@@ -151,7 +150,7 @@ class TrainingApp:
         self.device = torch.device("cuda:0" if self.use_cuda else "cpu")
 
         self.model = self.initModel()
-        self.criterion = self.initNigLoss()
+        self.criterion = self.initNigLoss(self.cli_args.lambda_value)
 
     def initModel(self):
         log.info("Loading IResNetEvidential CNN...")
@@ -336,6 +335,7 @@ class TrainingApp:
         log.info(f"Data Augmentation: {self.cli_args.augment}")
         log.info(f"Optimizer: {self.cli_args.optimizer}")
         log.info(f"Momentum: {self.cli_args.momentum}")
+        log.info(f"Regularization Constant (Lambda): {self.cli_args.lambda_value}")
         log.info(f"Gradient Clip: {self.cli_args.grad_clip}")
         if self.cli_args.grad_clip:
             log.info(f"Clip Max: {self.cli_args.grad_max}")

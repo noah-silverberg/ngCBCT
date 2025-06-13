@@ -433,8 +433,10 @@ def main():
                 # (done) TODO exclude FF 16 scan 01
                 # (done) TODO also make 3 more tables, with 20 slices around tumor (10 on each side)
                 # (done) TODO also make 3 more tables, with 40 slices around tumor (20 on each side)
-
-                # TODO redo paper figures (black background)
+                # (done) TODO redo paper figures (black background)
+                # FIGURE 5 -- HF P20 SCAN01
+                # FIGURE 6 -- HF P14 SCAN01
+                # FIGURE 7 -- FF P22 SCAN01
 
                 rec = {
                     "scan_type": scan_type,

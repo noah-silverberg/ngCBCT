@@ -930,3 +930,164 @@ class IResNetEvidential(nn.Module):
         beta = F.softplus(d1[:, 3:4, :, :]) + 1e-6
 
         return gamma, nu, alpha, beta
+
+
+class SingleConvDropout(nn.Module):
+    def __init__(self, ch_in, ch_out):
+        super(SingleConvDropout, self).__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(ch_in, ch_out, kernel_size=3, stride=1, padding=1, bias=True),
+            nn.InstanceNorm2d(ch_out),
+            nn.ReLU(inplace=True),
+        )
+
+    def forward(self, x):
+        x = self.conv(x)
+        return x
+
+
+class ConvBlockDropout(nn.Module):
+    def __init__(self, ch_in, ch_out):
+        super(ConvBlockDropout, self).__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(ch_in, ch_out, kernel_size=3, stride=1, padding=1, bias=True),
+            nn.InstanceNorm2d(ch_out),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(ch_out, ch_out, kernel_size=3, stride=1, padding=1, bias=True),
+            nn.InstanceNorm2d(ch_out),
+            nn.ReLU(inplace=True),
+        )
+
+    def forward(self, x):
+        x = self.conv(x)
+        return x
+
+
+class UpConvBlockDropout(nn.Module):
+    def __init__(self, ch_in, ch_out, up_conv):
+        super(UpConvBlockDropout, self).__init__()
+
+        if up_conv:
+            self.up = nn.Sequential(
+                nn.ConvTranspose2d(
+                    ch_in, ch_out, kernel_size=3, stride=2, padding=1, output_padding=1
+                ),
+                nn.InstanceNorm2d(ch_out),
+                nn.ReLU(inplace=True),
+            )
+
+        else:
+            self.up = nn.Sequential(
+                nn.Upsample(scale_factor=2),
+                nn.Conv2d(ch_in, ch_out, kernel_size=3, stride=1, padding=1, bias=True),
+                nn.InstanceNorm2d(ch_out),
+                nn.ReLU(inplace=True),
+            )
+
+    def forward(self, x):
+        x = self.up(x)
+        return x
+
+
+class ResidualBlock_modDropout(nn.Module):
+    # ReflectionPad and InstanceNorm
+    def __init__(self, ch_in):
+        super(ResidualBlock_modDropout, self).__init__()
+
+        self.block = nn.Sequential(
+            # Pads the input tensor using the reflection of the input boundary
+            nn.ReflectionPad2d(1),
+            nn.Conv2d(ch_in, ch_in, 3),
+            nn.InstanceNorm2d(ch_in),
+            nn.ReLU(inplace=True),
+            nn.ReflectionPad2d(1),
+            nn.Conv2d(ch_in, ch_in, 3),
+            nn.InstanceNorm2d(ch_in),
+        )
+        self.relu = nn.Sequential(nn.ReLU(inplace=True))
+
+    def forward(self, x):
+        y = x + self.block(x)
+        y1 = self.relu(y)
+        return y1
+
+
+class IResNetDropout(nn.Module):
+
+    def __init__(self, img_ch=1, output_ch=1):
+        super(IResNetDropout, self).__init__()
+
+        up_conv = True
+
+        self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
+
+        self.conv1 = ConvBlockDropout(ch_in=img_ch, ch_out=64)
+        self.conv1_extra = SingleConvDropout(ch_in=64, ch_out=64)
+        self.conv2 = ConvBlockDropout(ch_in=64, ch_out=128)
+        self.conv3 = ConvBlockDropout(ch_in=128, ch_out=256)
+        self.conv4 = ConvBlockDropout(ch_in=256, ch_out=512)
+        self.conv5 = ConvBlockDropout(ch_in=512, ch_out=1024)
+
+        self.resnet = ResidualBlock_modDropout(ch_in=1024)
+        # self.resnet = ResidualBlock(ch_in=1024)
+
+        self.up5 = UpConvBlockDropout(ch_in=1024, ch_out=512, up_conv=up_conv)
+        self.up_conv5 = ConvBlockDropout(ch_in=1024, ch_out=512)
+        self.up4 = UpConvBlockDropout(ch_in=512, ch_out=256, up_conv=up_conv)
+        self.up_conv4 = ConvBlockDropout(ch_in=512, ch_out=256)
+        self.up3 = UpConvBlockDropout(ch_in=256, ch_out=128, up_conv=up_conv)
+        self.up_conv3 = ConvBlockDropout(ch_in=256, ch_out=128)
+        self.up2 = UpConvBlockDropout(ch_in=128, ch_out=64, up_conv=up_conv)
+        self.up_conv2 = ConvBlockDropout(ch_in=128, ch_out=64)
+
+        self.conv_1x1 = nn.Conv2d(64, output_ch, kernel_size=1, stride=1, padding=0)
+
+    def forward(self, input):
+        # encoding path
+        e1 = self.conv1(input)
+        e1 = self.conv1_extra(e1)
+
+        e2 = self.maxpool(e1)
+        e2 = self.conv2(e2)
+
+        e3 = self.maxpool(e2)
+        e3 = self.conv3(e3)
+
+        e4 = self.maxpool(e3)
+        e4 = self.conv4(e4)
+
+        e5 = self.maxpool(e4)
+        e5 = self.conv5(e5)
+
+        # ResNet Blocks
+        r1 = self.resnet(e5)
+        r2 = self.resnet(r1)
+        r3 = self.resnet(r2)
+        r4 = self.resnet(r3)
+        r5 = self.resnet(r4)
+        r6 = self.resnet(r5)
+        r7 = self.resnet(r6)
+
+        # decoding + concat path
+        d5 = self.up5(r7)
+        d5 = torch.cat((e4, d5), dim=1)
+        d5 = self.up_conv5(d5)
+
+        d4 = self.up4(d5)
+        d4 = torch.cat((e3, d4), dim=1)
+        d4 = self.up_conv4(d4)
+
+        d3 = self.up3(d4)
+        d3 = torch.cat((e2, d3), dim=1)
+        d3 = self.up_conv3(d3)
+
+        d2 = self.up2(d3)
+        d2 = torch.cat((e1, d2), dim=1)
+        d2 = self.up_conv2(d2)
+
+        d1 = self.conv_1x1(d2)
+
+        # additional skip connection between input and output
+        result = input + d1
+
+        return result

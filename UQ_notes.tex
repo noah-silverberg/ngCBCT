@@ -96,9 +96,9 @@
 
 \maketitle
 
-\section{``Evidential" DL}
+\section{Evidential Regression}
 
-Idea adapted from \cite{sensoy2018evidentialdeeplearningquantify}, which was UQ for classification networks.
+Idea adapted from \cite{sensoy2018evidentialdeeplearningquantify}, which was UQ for classification networks. Then some papers extended it to regression, such as \cite{amini2020deep}.
 
 \subsection{Background/Theory}
 
@@ -129,12 +129,12 @@ This is also annoying to derive, but it can be shown that
 $$p(y \mid \gamma, \nu, \alpha, \beta) = \text{Student-}t_{2\alpha} \left( y \mid \mathrm{loc} = \gamma,\,\mathrm{scale}^2 = \f{\beta(\nu + 1)}{\alpha \nu} \right)$$
 where $\text{Student-}t_{2\alpha}$ is the Student's $t$ distribution with $2\alpha$ degrees of freedom.
 
-So we get a prediction along with measures of both aleatoric and epistemic uncertainty:
+So we get a prediction along with measures of both aleatoric and epistemic uncertainty \cite{amini2020deep}:
 $$\underbrace{\mathbb{E}[\mu] = \gamma}_{\text{prediction}}, \quad \underbrace{\mathbb{E}[\sigma^2] = \f{\beta}{\alpha - 1}}_{\text{aleatoric}}, \quad \underbrace{\mathrm{Var}[\mu] = \f{\beta}{\nu(\alpha - 1)}}_{\text{epistemic}}$$
 
 \subsubsection{Conjugate Priors}
 
-Let's say we get a bunch of samples $y_1, y_2, \ldots, y_n$. By Bayes' theorem:
+Let's say we get a bunch of samples $y_1, y_2, \ldots, y_n$, and we want to update our beliefs about $\mu$ and $\sigma^2$ given this new data. By Bayes' theorem:
 \begin{align*}
     p(\mu, \sigma^2 \mid y_1, y_2, \ldots, y_n) &\propto p(\mu, \sigma^2) \prod_{i=1}^n p(y_i \mid \mu, \sigma^2) \\
     &=\text{N-}\Gamma^{-1}(\mu, \sigma^2 \mid \gamma, \nu, \alpha, \beta) \cdot \prod_{i=1}^n \mathcal{N}(y_i \mid \mu, \sigma^2) \\
@@ -163,21 +163,47 @@ We need the model to now output the parameters of the prior distribution, i.e., 
 $$\mathcal{L}_\mathrm{NLL}(\gamma, \nu, \alpha, \beta \mid y_1, y_2, \ldots, y_n) = -\log p(y_1, y_2, \ldots, y_n \mid \gamma, \nu, \alpha, \beta)$$
 This can be computed as:
 \begin{align*}
-    &\mathcal{L}_\mathrm{NLL}(\gamma, \nu, \alpha, \beta \mid y_1, y_2, \ldots, y_n) \\
+    &\mathcal{L}_\mathrm{NLL}(\gamma, \nu, \alpha, \beta \mid y) \\
     &= \f{1}{2}\log\left(\f{\pi}{\nu}\right) - \alpha\log(\Omega) + \left(\alpha + \f{1}{2}\right)\log((y - \gamma)^2\nu + \Omega) + \log\left(\f{\Gamma(\alpha)}{\Gamma\left(\alpha + \f{1}{2}\right)}\right)
 \end{align*}
 where $\Omega = 2\beta(1 + \nu)$. The model may become overconfident by driving $\alpha,\nu \to \infty$, so we can add a regularization term to the loss:
-$$\mathcal{L}_\mathrm{reg}(\gamma, \nu, \alpha, \beta) = |y - \gamma| \cdot (2\nu + \alpha)$$
+$$\mathcal{L}_\mathrm{reg}(\gamma, \nu, \alpha, \beta \mid y) = |y - \gamma| \cdot (2\nu + \alpha)$$
 to penalize high confidence when the prediction is far from the mean.
 
 So the total loss is:
-$$\mathcal{L}(\gamma, \nu, \alpha, \beta \mid y_1, y_2, \ldots, y_n) = \mathcal{L}_\mathrm{NLL}(\gamma, \nu, \alpha, \beta \mid y_1, y_2, \ldots, y_n) + \lambda\mathcal{L}_\mathrm{reg}(\gamma, \nu, \alpha, \beta)$$
+$$\mathcal{L}(\gamma, \nu, \alpha, \beta \mid y) = \mathcal{L}_\mathrm{NLL}(\gamma, \nu, \alpha, \beta \mid y) + \lambda\mathcal{L}_\mathrm{reg}(\gamma, \nu, \alpha, \beta \mid y)$$
+
+\subsection{Pros/Cons}
+
+\subsubsection{Pros}
+
+\begin{itemize}
+  \item Requires little change from our current DDCNN architecuture. The only differences are (1) we need to change the loss function, and (2) we need to output 4 channels instead of 1.
+  \item We only need to do one forward pass to get the prediction and uncertainty estimates.
+  \item We only need to train one model.
+  \item Provides a measure of aleatoric and epistemic uncertainty \cite{amini2020deep}.
+\end{itemize}
+
+\subsubsection{Cons}
+
+\begin{itemize}
+  \item We don't necessarily know if the current size of the DDCNN would be sufficient to learn 4 parameters per pixel, it might require a larger model.
+  \item It isn't a super popular method (although there are some papers that use it).
+  \item It is not Bayesian, but I don't think that really matters to us.
+  \item It doesn't necessarily know how to handle out-of-distribution data (this is kind of important actually since the uncertainty values we get from it will only really be valid if the data is similar to the training data).
+\end{itemize}
 
 \section{MC Dropout}
 
+[[TODO -- general idea is that this requires minimal changes to DDCNN architecture (just need to turn on dropout during training and inference), but the main issue is that it takes multiple forward passes to get the uncertainty estimates, which is not practical in a clinical setting. This does seem to have good performance empirically, though.]]
+
 \section{Bayesian By Backprop (BBB)}
 
+[[TODO -- general idea is that this requires a lot of changes to the DDCNN architecuture, but it is fully Bayesian. Similar to MC Dropout, though, we need to do multiple forward passes to get the uncertainty estimates, which is not practical in a clinical setting. Also it doesn't seem to have super good performance from what I've read.]]
+
 \section{Deep Ensembles}
+
+[[TODO -- this requires no changes at all which is really nice. But it suffers again from the same issue as MCD and BBB which is multiple forward passes. However this emprirically does have good results.]]
 
 % Create bibliography with sensoy paper
 \bibliographystyle{plain}

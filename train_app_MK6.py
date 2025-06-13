@@ -204,13 +204,17 @@ class TrainingApp:
         return torch.abs(y_true - gamma) * (2.0 * nu + alpha)
 
     def initNigLoss(self, lambda_=1e-3):
-        def nig_loss(gamma, nu, alpha, beta, y_true):
-            loss = TrainingApp.nig_nll(
-                gamma, nu, alpha, beta, y_true
-            ) + lambda_ * TrainingApp.nig_reg(gamma, nu, alpha, beta, y_true)
-            return loss.mean()
+        def nig_loss_smoothL1(gamma, nu, alpha, beta, y_true):
+            # evidential NLL + regularizer
+            nll = TrainingApp.nig_nll(gamma, nu, alpha, beta, y_true)
+            reg = TrainingApp.nig_reg(gamma, nu, alpha, beta, y_true)
+            evidential = (nll + lambda_ * reg).mean()
+            # Smooth L1 between prediction (gamma) and truth
+            smooth_l1 = nn.SmoothL1Loss()(gamma, y_true)
+            # combine both losses
+            return evidential + smooth_l1
 
-        return nig_loss
+        return nig_loss_smoothL1
 
     def initTrainDl(self):
         log.info("Loading Training Data Sets From Saved Tensor...")

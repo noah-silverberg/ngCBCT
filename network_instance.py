@@ -4,28 +4,31 @@ import torch.nn.functional as F
 from torch.nn import init
 
 
-def init_weights(net, init_type='normal', gain=0.02):
+def init_weights(net, init_type="normal", gain=0.02):
     def init_func(m):
         classname = m.__class__.__name__
-        if hasattr(m, 'weight') and (classname.find('Conv') != -1 or classname.find('Linear') != -1):
-            if init_type == 'normal':
+        if hasattr(m, "weight") and (
+            classname.find("Conv") != -1 or classname.find("Linear") != -1
+        ):
+            if init_type == "normal":
                 init.normal_(m.weight.data, 0.0, gain)
-            elif init_type == 'xavier':
+            elif init_type == "xavier":
                 init.xavier_normal_(m.weight.data, gain=gain)
-            elif init_type == 'kaiming':
-                init.kaiming_normal_(m.weight.data, a=0, mode='fan_in')
-            elif init_type == 'orthogonal':
+            elif init_type == "kaiming":
+                init.kaiming_normal_(m.weight.data, a=0, mode="fan_in")
+            elif init_type == "orthogonal":
                 init.orthogonal_(m.weight.data, gain=gain)
             else:
                 raise NotImplementedError(
-                    'initialization method [%s] is not implemented' % init_type)
-            if hasattr(m, 'bias') and m.bias is not None:
+                    "initialization method [%s] is not implemented" % init_type
+                )
+            if hasattr(m, "bias") and m.bias is not None:
                 init.constant_(m.bias.data, 0.0)
-        elif classname.find('InstanceNorm2d') != -1:
+        elif classname.find("InstanceNorm2d") != -1:
             init.normal_(m.weight.data, 1.0, gain)
             init.constant_(m.bias.data, 0.0)
 
-    print('initialize network with %s' % init_type)
+    print("initialize network with %s" % init_type)
     net.apply(init_func)
 
 
@@ -33,10 +36,9 @@ class SingleConv(nn.Module):
     def __init__(self, ch_in, ch_out):
         super(SingleConv, self).__init__()
         self.conv = nn.Sequential(
-            nn.Conv2d(ch_in, ch_out, kernel_size=3,
-                      stride=1, padding=1, bias=True),
+            nn.Conv2d(ch_in, ch_out, kernel_size=3, stride=1, padding=1, bias=True),
             nn.InstanceNorm2d(ch_out),
-            nn.ReLU(inplace=True)
+            nn.ReLU(inplace=True),
         )
 
     def forward(self, x):
@@ -48,14 +50,12 @@ class ConvBlock(nn.Module):
     def __init__(self, ch_in, ch_out):
         super(ConvBlock, self).__init__()
         self.conv = nn.Sequential(
-            nn.Conv2d(ch_in, ch_out, kernel_size=3,
-                      stride=1, padding=1, bias=True),
+            nn.Conv2d(ch_in, ch_out, kernel_size=3, stride=1, padding=1, bias=True),
             nn.InstanceNorm2d(ch_out),
             nn.ReLU(inplace=True),
-            nn.Conv2d(ch_out, ch_out, kernel_size=3,
-                      stride=1, padding=1, bias=True),
+            nn.Conv2d(ch_out, ch_out, kernel_size=3, stride=1, padding=1, bias=True),
             nn.InstanceNorm2d(ch_out),
-            nn.ReLU(inplace=True)
+            nn.ReLU(inplace=True),
         )
 
     def forward(self, x):
@@ -67,18 +67,15 @@ class DownConvBlock(nn.Module):
     def __init__(self, ch_in, ch_out):
         super(DownConvBlock, self).__init__()
         self.conv = nn.Sequential(
-            nn.Conv2d(ch_in, ch_in, kernel_size=3,
-                      stride=1, padding=1, bias=True),
+            nn.Conv2d(ch_in, ch_in, kernel_size=3, stride=1, padding=1, bias=True),
             nn.InstanceNorm2d(ch_out),
             nn.ReLU(inplace=True),
-            nn.Conv2d(ch_in, ch_in, kernel_size=3,
-                      stride=1, padding=1, bias=True),
+            nn.Conv2d(ch_in, ch_in, kernel_size=3, stride=1, padding=1, bias=True),
             nn.InstanceNorm2d(ch_out),
             nn.ReLU(inplace=True),
-            nn.Conv2d(ch_in, ch_out, kernel_size=3,
-                      stride=2, padding=1, bias=True),
+            nn.Conv2d(ch_in, ch_out, kernel_size=3, stride=2, padding=1, bias=True),
             nn.InstanceNorm2d(ch_out),
-            nn.ReLU(inplace=True)
+            nn.ReLU(inplace=True),
         )
 
     def forward(self, x):
@@ -92,19 +89,19 @@ class UpConvBlock(nn.Module):
 
         if up_conv:
             self.up = nn.Sequential(
-                nn.ConvTranspose2d(ch_in, ch_out, kernel_size=3,
-                                   stride=2, padding=1, output_padding=1),
+                nn.ConvTranspose2d(
+                    ch_in, ch_out, kernel_size=3, stride=2, padding=1, output_padding=1
+                ),
                 nn.InstanceNorm2d(ch_out),
-                nn.ReLU(inplace=True)
+                nn.ReLU(inplace=True),
             )
 
         else:
             self.up = nn.Sequential(
                 nn.Upsample(scale_factor=2),
-                nn.Conv2d(ch_in, ch_out, kernel_size=3,
-                          stride=1, padding=1, bias=True),
+                nn.Conv2d(ch_in, ch_out, kernel_size=3, stride=1, padding=1, bias=True),
                 nn.InstanceNorm2d(ch_out),
-                nn.ReLU(inplace=True)
+                nn.ReLU(inplace=True),
             )
 
     def forward(self, x):
@@ -118,10 +115,9 @@ class RecurrentBlock(nn.Module):
         self.t = t
         self.ch_out = ch_out
         self.conv = nn.Sequential(
-            nn.Conv2d(ch_out, ch_out, kernel_size=3,
-                      stride=1, padding=1, bias=True),
+            nn.Conv2d(ch_out, ch_out, kernel_size=3, stride=1, padding=1, bias=True),
             nn.InstanceNorm2d(ch_out),
-            nn.ReLU(inplace=True)
+            nn.ReLU(inplace=True),
         )
 
     def forward(self, x):
@@ -130,7 +126,7 @@ class RecurrentBlock(nn.Module):
             if i == 0:
                 x1 = self.conv(x)
 
-            x1 = self.conv(x+x1)
+            x1 = self.conv(x + x1)
         return x1
 
 
@@ -138,16 +134,14 @@ class RRCNNBlock(nn.Module):
     def __init__(self, ch_in, ch_out, t=2):
         super(RRCNNBlock, self).__init__()
         self.RCNN = nn.Sequential(
-            RecurrentBlock(ch_out, t=t),
-            RecurrentBlock(ch_out, t=t)
+            RecurrentBlock(ch_out, t=t), RecurrentBlock(ch_out, t=t)
         )
-        self.conv_1x1 = nn.Conv2d(
-            ch_in, ch_out, kernel_size=1, stride=1, padding=0)
+        self.conv_1x1 = nn.Conv2d(ch_in, ch_out, kernel_size=1, stride=1, padding=0)
 
     def forward(self, x):
         x = self.conv_1x1(x)
         x1 = self.RCNN(x)
-        return x+x1
+        return x + x1
 
 
 class ResidualBlock(nn.Module):
@@ -157,19 +151,15 @@ class ResidualBlock(nn.Module):
 
         self.block = nn.Sequential(
             # Pads the input tensor using the reflection of the input boundary
-            nn.Conv2d(ch_in, ch_in, kernel_size=3,
-                      stride=1, padding=1, bias=True),
+            nn.Conv2d(ch_in, ch_in, kernel_size=3, stride=1, padding=1, bias=True),
             nn.BatchNorm2d(ch_in),
             # nn.InstanceNorm2d(ch_in),
             nn.ReLU(inplace=True),
-            nn.Conv2d(ch_in, ch_in, kernel_size=3,
-                      stride=1, padding=1, bias=True),
-            nn.BatchNorm2d(ch_in)
+            nn.Conv2d(ch_in, ch_in, kernel_size=3, stride=1, padding=1, bias=True),
+            nn.BatchNorm2d(ch_in),
             # nn.InstanceNorm2d(ch_in),
         )
-        self.relu = nn.Sequential(
-            nn.ReLU(inplace=True)
-        )
+        self.relu = nn.Sequential(nn.ReLU(inplace=True))
 
     def forward(self, x):
         y = x + self.block(x)
@@ -190,11 +180,9 @@ class ResidualBlock_mod(nn.Module):
             nn.ReLU(inplace=True),
             nn.ReflectionPad2d(1),
             nn.Conv2d(ch_in, ch_in, 3),
-            nn.InstanceNorm2d(ch_in)
+            nn.InstanceNorm2d(ch_in),
         )
-        self.relu = nn.Sequential(
-            nn.ReLU(inplace=True)
-        )
+        self.relu = nn.Sequential(nn.ReLU(inplace=True))
 
     def forward(self, x):
         y = x + self.block(x)
@@ -216,7 +204,7 @@ class ResidualBlock_mod_2(nn.Module):
             nn.ReLU(inplace=True),
             nn.ReflectionPad2d(1),
             nn.Conv2d(ch_in, ch_in, 3),
-            nn.InstanceNorm2d(ch_in)
+            nn.InstanceNorm2d(ch_in),
         )
 
     def forward(self, x):
@@ -228,21 +216,19 @@ class AttentionBlock(nn.Module):
     def __init__(self, F_g, F_l, F_int):
         super(AttentionBlock, self).__init__()
         self.W_g = nn.Sequential(
-            nn.Conv2d(F_g, F_int, kernel_size=1,
-                      stride=1, padding=0, bias=True),
-            nn.InstanceNorm2d(F_int)
+            nn.Conv2d(F_g, F_int, kernel_size=1, stride=1, padding=0, bias=True),
+            nn.InstanceNorm2d(F_int),
         )
 
         self.W_x = nn.Sequential(
-            nn.Conv2d(F_l, F_int, kernel_size=1,
-                      stride=1, padding=0, bias=True),
-            nn.InstanceNorm2d(F_int)
+            nn.Conv2d(F_l, F_int, kernel_size=1, stride=1, padding=0, bias=True),
+            nn.InstanceNorm2d(F_int),
         )
 
         self.psi = nn.Sequential(
             nn.Conv2d(F_int, 1, kernel_size=1, stride=1, padding=0, bias=True),
             nn.InstanceNorm2d(1),
-            nn.Sigmoid()
+            nn.Sigmoid(),
         )
 
         self.relu = nn.ReLU(inplace=True)
@@ -250,10 +236,10 @@ class AttentionBlock(nn.Module):
     def forward(self, g, x):
         g1 = self.W_g(g)
         x1 = self.W_x(x)
-        psi = self.relu(g1+x1)
+        psi = self.relu(g1 + x1)
         psi = self.psi(psi)
 
-        return x*psi
+        return x * psi
 
 
 class UNet(nn.Module):
@@ -282,8 +268,7 @@ class UNet(nn.Module):
         self.up2 = UpConvBlock(ch_in=128, ch_out=64, up_conv=up_conv)
         self.up_conv2 = ConvBlock(ch_in=128, ch_out=64)
 
-        self.conv_1x1 = nn.Conv2d(
-            64, output_ch, kernel_size=1, stride=1, padding=0)
+        self.conv_1x1 = nn.Conv2d(64, output_ch, kernel_size=1, stride=1, padding=0)
 
     def forward(self, x):
         # encoding path
@@ -358,8 +343,7 @@ class R2UNet(nn.Module):
         self.up2 = UpConvBlock(ch_in=128, ch_out=64, up_conv=up_conv)
         self.up_RRCNN2 = RRCNNBlock(ch_in=128, ch_out=64, t=t)
 
-        self.conv_1x1 = nn.Conv2d(
-            64, output_ch, kernel_size=1, stride=1, padding=0)
+        self.conv_1x1 = nn.Conv2d(64, output_ch, kernel_size=1, stride=1, padding=0)
 
     def forward(self, x):
         # encoding path
@@ -433,8 +417,7 @@ class AttUNet(nn.Module):
         self.att2 = AttentionBlock(F_g=64, F_l=64, F_int=32)
         self.up_conv2 = ConvBlock(ch_in=128, ch_out=64)
 
-        self.conv_1x1 = nn.Conv2d(
-            64, output_ch, kernel_size=1, stride=1, padding=0)
+        self.conv_1x1 = nn.Conv2d(64, output_ch, kernel_size=1, stride=1, padding=0)
 
     def forward(self, input):
         # encoding path
@@ -517,8 +500,7 @@ class R2AttUNet(nn.Module):
         self.att2 = AttentionBlock(F_g=64, F_l=64, F_int=32)
         self.up_RRCNN2 = RRCNNBlock(ch_in=128, ch_out=64, t=t)
 
-        self.conv_1x1 = nn.Conv2d(
-            64, output_ch, kernel_size=1, stride=1, padding=0)
+        self.conv_1x1 = nn.Conv2d(64, output_ch, kernel_size=1, stride=1, padding=0)
 
     def forward(self, x):
         # encoding path
@@ -591,8 +573,7 @@ class FBPCONVNet(nn.Module):
         self.up2 = UpConvBlock(ch_in=128, ch_out=64, up_conv=up_conv)
         self.up_conv2 = ConvBlock(ch_in=128, ch_out=64)
 
-        self.conv_1x1 = nn.Conv2d(
-            64, output_ch, kernel_size=1, stride=1, padding=0)
+        self.conv_1x1 = nn.Conv2d(64, output_ch, kernel_size=1, stride=1, padding=0)
 
     def forward(self, input):
         # encoding path
@@ -664,8 +645,7 @@ class FBPCONVNet_dropout(nn.Module):
         self.up2 = UpConvBlock(ch_in=128, ch_out=64, up_conv=up_conv)
         self.up_conv2 = ConvBlock(ch_in=128, ch_out=64)
 
-        self.conv_1x1 = nn.Conv2d(
-            64, output_ch, kernel_size=1, stride=1, padding=0)
+        self.conv_1x1 = nn.Conv2d(64, output_ch, kernel_size=1, stride=1, padding=0)
 
     def forward(self, input):
         # encoding path
@@ -737,8 +717,7 @@ class IResNet(nn.Module):
         self.up2 = UpConvBlock(ch_in=128, ch_out=64, up_conv=up_conv)
         self.up_conv2 = ConvBlock(ch_in=128, ch_out=64)
 
-        self.conv_1x1 = nn.Conv2d(
-            64, output_ch, kernel_size=1, stride=1, padding=0)
+        self.conv_1x1 = nn.Conv2d(64, output_ch, kernel_size=1, stride=1, padding=0)
 
     def forward(self, input):
         # encoding path
@@ -817,8 +796,7 @@ class IResNet_mod(nn.Module):
         self.up2 = UpConvBlock(ch_in=128, ch_out=64, up_conv=up_conv)
         self.up_conv2 = ConvBlock(ch_in=128, ch_out=64)
 
-        self.conv_1x1 = nn.Conv2d(
-            64, output_ch, kernel_size=1, stride=1, padding=0)
+        self.conv_1x1 = nn.Conv2d(64, output_ch, kernel_size=1, stride=1, padding=0)
 
     def forward(self, input):
         # encoding path
@@ -865,3 +843,90 @@ class IResNet_mod(nn.Module):
         result = input + d1
 
         return result
+
+
+class IResNetEvidential(nn.Module):
+
+    def __init__(self, img_ch=1):
+        super(IResNetEvidential, self).__init__()
+
+        up_conv = True
+
+        self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
+
+        self.conv1 = ConvBlock(ch_in=img_ch, ch_out=64)
+        self.conv1_extra = SingleConv(ch_in=64, ch_out=64)
+        self.conv2 = ConvBlock(ch_in=64, ch_out=128)
+        self.conv3 = ConvBlock(ch_in=128, ch_out=256)
+        self.conv4 = ConvBlock(ch_in=256, ch_out=512)
+        self.conv5 = ConvBlock(ch_in=512, ch_out=1024)
+
+        self.resnet = ResidualBlock_mod(ch_in=1024)
+        # self.resnet = ResidualBlock(ch_in=1024)
+
+        self.up5 = UpConvBlock(ch_in=1024, ch_out=512, up_conv=up_conv)
+        self.up_conv5 = ConvBlock(ch_in=1024, ch_out=512)
+        self.up4 = UpConvBlock(ch_in=512, ch_out=256, up_conv=up_conv)
+        self.up_conv4 = ConvBlock(ch_in=512, ch_out=256)
+        self.up3 = UpConvBlock(ch_in=256, ch_out=128, up_conv=up_conv)
+        self.up_conv3 = ConvBlock(ch_in=256, ch_out=128)
+        self.up2 = UpConvBlock(ch_in=128, ch_out=64, up_conv=up_conv)
+        self.up_conv2 = ConvBlock(ch_in=128, ch_out=64)
+
+        self.conv_1x1 = nn.Conv2d(64, 4, kernel_size=1, stride=1, padding=0)
+
+    def forward(self, input):
+        # encoding path
+        e1 = self.conv1(input)
+        e1 = self.conv1_extra(e1)
+
+        e2 = self.maxpool(e1)
+        e2 = self.conv2(e2)
+
+        e3 = self.maxpool(e2)
+        e3 = self.conv3(e3)
+
+        e4 = self.maxpool(e3)
+        e4 = self.conv4(e4)
+
+        e5 = self.maxpool(e4)
+        e5 = self.conv5(e5)
+
+        # ResNet Blocks
+        r1 = self.resnet(e5)
+        r2 = self.resnet(r1)
+        r3 = self.resnet(r2)
+        r4 = self.resnet(r3)
+        r5 = self.resnet(r4)
+        r6 = self.resnet(r5)
+        r7 = self.resnet(r6)
+
+        # decoding + concat path
+        d5 = self.up5(r7)
+        d5 = torch.cat((e4, d5), dim=1)
+        d5 = self.up_conv5(d5)
+
+        d4 = self.up4(d5)
+        d4 = torch.cat((e3, d4), dim=1)
+        d4 = self.up_conv4(d4)
+
+        d3 = self.up3(d4)
+        d3 = torch.cat((e2, d3), dim=1)
+        d3 = self.up_conv3(d3)
+
+        d2 = self.up2(d3)
+        d2 = torch.cat((e1, d2), dim=1)
+        d2 = self.up_conv2(d2)
+
+        d1 = self.conv_1x1(d2)
+
+        # additional skip connection between input and output channel 1
+        gamma = input + d1[:, 0:1, :, :]
+
+        # softplus the other channels to ensure positivity (and add 1 to alpha)
+        # and an additional small bit, in case there is underflow in softplus
+        nu = F.softplus(d1[:, 1:2, :, :]) + 1e-6
+        alpha = F.softplus(d1[:, 2:3, :, :]) + 1.0 + 1e-6
+        beta = F.softplus(d1[:, 3:4, :, :]) + 1e-6
+
+        return gamma, nu, alpha, beta

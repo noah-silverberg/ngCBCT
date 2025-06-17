@@ -1,15 +1,24 @@
-# Implements Notebook 1 functionality: load projection data, simulate non-gated and interpolate
 import numpy as np
 import torch
-import scipy.io
 import mat73
-import matplotlib.pyplot as plt
 import torch.nn as nn
 from .config import WORK_ROOT
 
 
 def load_projection_mat(patient: str, scan: str, scan_type: str):
-    """Load projection data from mat file.."""
+    """
+    Load projection data from a .mat file.
+
+    Args:
+        patient (str): Patient identifier (e.g., '13'), scalar string.
+        scan (str): Scan identifier (e.g., '01'), scalar string.
+        scan_type (str): Type of scan (e.g., 'nonstop'), scalar string.
+
+    Returns:
+        odd_index (np.ndarray): shape (K,), 1-based indices of nonstop-gated angles.
+        angles (torch.Tensor): shape (A,), gated projection angles.
+        prj (torch.Tensor): shape (W, H, A), gated projection data.
+    """
     # Load projection mat file for a given scan
     mat_path = f"{WORK_ROOT}/data/panc_prj/{scan_type}/mat/panc{patient}.{scan_type}{scan}.mat"  # TODO change path as needed
     mat = mat73.loadmat(mat_path)
@@ -21,23 +30,41 @@ def load_projection_mat(patient: str, scan: str, scan_type: str):
 
 
 def reformat_sinogram(prj: torch.Tensor, angles: torch.Tensor):
-    """Reformat sinogram and angles."""
+    """
+    Reformat sinogram tensor and adjust angles.
+
+    Args:
+        prj (torch.Tensor): shape (W, H, A), gated sinogram.
+        angles (torch.Tensor): shape (A,), gated acquisition angles.
+
+    Returns:
+        prj (torch.Tensor): shape (A, H, W), flipped and permuted sinogram.
+        angles1 (torch.Tensor): shape (A,), reformatted angles in radians.
+    """
     # Flips and permutations to match the expected format
-    prj_gcbct = prj.detach().clone()
-    prj_gcbct = torch.flip(prj_gcbct, (1,))
-    prj_gcbct = prj_gcbct.permute(2, 1, 0)
-    prj_gcbct = torch.flip(prj_gcbct, (2,))
+    prj = prj.detach().clone()
+    prj = torch.flip(prj, (1,))
+    prj = prj.permute(2, 1, 0)
+    prj = torch.flip(prj, (2,))
 
     # Flips the angles if they are in the opposite order
     angles1 = -(angles + np.pi / 2)
     if (angles1[-1:] - angles1[0]) < 0:
         angles1 = torch.flip(angles1, (0,))
-        prj_gcbct = torch.flip(prj_gcbct, (0,))
-    return prj_gcbct, angles1
+        prj = torch.flip(prj, (0,))
+    return prj, angles1
 
 
 def find_missing_indices(odd_index: np.ndarray):
-    """Return sorted missing indices between first and last of odd_index."""
+    """
+    Find missing angle indices in a sequence.
+
+    Args:
+        odd_index (np.ndarray): shape (K,), sorted 1-based acquired indices.
+
+    Returns:
+        List[int]: sorted missing integer indices between first and last.
+    """
     first, last = odd_index[0], odd_index[-1]
     full_range = set(range(first, last + 1))
     present = set(odd_index)
@@ -46,7 +73,17 @@ def find_missing_indices(odd_index: np.ndarray):
 
 
 def interpolate_projections(prj_gcbct: torch.Tensor, odd_index: np.ndarray):
-    """Given prj_gcbct [num_angles, H, W] and acquired odd_index (1-based), zero out missing and linearly interpolate."""
+    """
+    Simulate nonstop-gated scan.
+    Zero out missing angles in sinogram and linearly interpolate them.
+
+    Args:
+        prj_gcbct (torch.Tensor): shape (A, H, W), gated sinogram.
+        odd_index (np.ndarray): shape (K,), 1-based indices of acquired angles.
+
+    Returns:
+        prj_ngcbct_li (torch.Tensor): shape (A, H, W), nonstop-gated sinogram with missing angles interpolated.
+    """
     # NOTE: This function is a bit hard to read...but it works
     #       it also is not optimized for speed
     #       but this is not a bottleneck in the pipeline so we don't worry about it
@@ -129,7 +166,15 @@ def interpolate_projections(prj_gcbct: torch.Tensor, odd_index: np.ndarray):
 
 
 def pad_and_reshape(prj: torch.Tensor):
-    """Pad prj to [angles, 1, H, 512] tensor with reflection padding, and reshape."""
+    """
+    Pad and reshape sinogram for CNN input.
+
+    Args:
+        prj (torch.Tensor): shape (A, H, 510), where A is number of angles.
+
+    Returns:
+        torch.Tensor: shape (H, A, 512), after reflection padding and permute.
+    """
     # prj: [angles, H, 510]
     # Pads the final dimension from 510 to 512
     # Since we need this shape for the CNN (due to maxpooling)
@@ -142,7 +187,17 @@ def pad_and_reshape(prj: torch.Tensor):
 
 
 def divide_sinogram(prj: torch.Tensor, v_dim: int):
-    """Reflection pad last dimension from 510 to 512, then select first and last v_dim angles"""
+    """
+    Select top/bottom angle "halves" and combine.
+    So each sinogram is divided into two halves, which are then concatenated.
+
+    Args:
+        prj (torch.Tensor): shape (H, A, 512).
+        v_dim (int): number of angles to select from start and end.
+
+    Returns:
+        torch.Tensor: shape (2*H, 1, v_dim, 512), concatenated "half"-sinograms.
+    """
     # prj: [H, angles, 512]
     # Now assemble first and last v_dim slices along H axis
     top = prj[:, :v_dim, :]

@@ -19,8 +19,9 @@ data_version = "12.2"  # e.g., '12'
 model_version = "MK6"
 
 # PD training settings
-PD_training_app = "train_app_MK6.TrainingApp"
+PD_training_app = "train_app_MK6numpy.TrainingApp"
 PD_epochs = 20
+PD_learning_rate = 1e-3  # Either float or list (if the list is shorter than the number of epochs, the last value is used for the rest of the epochs)
 PD_network_name = "IResNet"  # Network name for PD CNN (see network_instance.py)
 PD_model_name = (
     f"{PD_network_name}_{model_version}_DS{data_version}_PD"  # Model name for saving
@@ -28,15 +29,40 @@ PD_model_name = (
 PD_batch_size = 8
 PD_optimizer = "NAdam"
 PD_num_workers = 0
+PD_shuffle = True
+PD_grad_clip = True
+PD_grad_max = 0.01  # Only used if PD_grad_clip is True
+PD_betas_NAdam = (0.9, 0.999)  # Only for NAdam, otherwise ignored
+PD_momentum_decay_NAdam = 4e-4  # Only for NAdam, otherwise ignored
+PD_momentum_SGD = 0.99  # Only for SGD, otherwise ignored
+PD_weight_decay_SGD = 1e-8  # Only for SGD, otherwise ignored
+PD_checkpoint_save_freq = 10  # Save checkpoint every N epochs
+PD_tensor_board = False  # Whether to use TensorBoard for PD training
+PD_tensor_board_comment = ""  # If using TensorBoard, a comment suffix
+PD_train_during_inference = False  # Whether to put the model in training mode during inference (e.g., for MC dropout)
 
 # ID training settings
 ID_training_app = "train_app_MK6_numpy.TrainingApp"
 ID_epochs = 50
+ID_learning_rate = 1e-3
 ID_network_name = "IResNet"
 ID_model_name = f"{ID_network_name}_{model_version}_DS{data_version}_ID"
 ID_batch_size = 8
 ID_optimizer = "NAdam"
 ID_num_workers = 0
+ID_shuffle = True
+ID_grad_clip = True
+ID_grad_max = 0.01  # Only used if ID_grad_clip is True
+ID_betas_NAdam = (0.9, 0.999)  # Only for NAdam
+ID_momentum_decay_NAdam = 4e-4  # Only for NAdam
+ID_momentum_SGD = 0.99  # Only for SGD
+ID_weight_decay_SGD = 1e-8  # Only for SGD
+ID_augment = True  # Whether to use augmented data for ID training
+ID_checkpoint_save_freq = 10
+ID_tensor_board = False
+ID_tensor_board_comment = ""  # Only if using TensorBoard
+ID_train_during_inference = False
+ID_input_type = "FDK"
 
 # Directories derived from bases
 PHASE_DATAVER_DIR = os.path.join(

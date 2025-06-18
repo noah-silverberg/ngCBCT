@@ -3,19 +3,14 @@ import os
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = "1"  # specify which GPU(s) to be used
 
-import argparse
 import datetime
 import time
-import math
-import sys
 import gc
-import numpy as np
 from torch.utils.tensorboard import SummaryWriter
 import torch
 import torch.nn as nn
 from torch.optim import SGD, Adam, NAdam
-from torch.utils.data import DataLoader
-from .dsets import PairSet, PairNumpySet, CTSet
+from .dsets import PairNumpySet
 from . import network_instance
 import logging
 from dataclasses import dataclass
@@ -63,6 +58,7 @@ from .config import (
     ID_tensor_board,
     ID_tensor_board_comment,
     ID_train_during_inference,
+    ID_input_type,
 )
 
 
@@ -78,7 +74,6 @@ device = torch.device("cuda:0" if use_cuda else "cpu")
 log.debug("Using CUDA; {} devices.".format(torch.cuda.device_count()))
 
 
-# TODO add PL back
 @dataclass
 class TrainingArgs:
     epoch: int
@@ -102,6 +97,7 @@ class TrainingArgs:
     scan_type: str
     domain: str
     train_during_inference: bool
+    input_type: str
 
     def __str__(self):  # nice printing of the training args
         lines = [
@@ -138,6 +134,7 @@ class TrainingArgs:
             f"scan_type: {self.scan_type}",
             f"domain: {self.domain}",
             f"train_during_inference: {self.train_during_inference}",
+            f"input_type: {self.input_type}",
         ]
 
         return "\n".join(lines)
@@ -168,6 +165,7 @@ def get_training_args(domain, scan_type):
             scan_type=scan_type,
             domain=domain,
             train_during_inference=PD_train_during_inference,
+            input_type=None,  # PD does not use input_type
         )
     elif domain == "IMAG":
         args = TrainingArgs(
@@ -192,6 +190,7 @@ def get_training_args(domain, scan_type):
             scan_type=scan_type,
             domain=domain,
             train_during_inference=ID_train_during_inference,
+            input_type=ID_input_type,  # "FDK" or "PL"
         )
     else:
         raise ValueError(
@@ -268,6 +267,7 @@ def get_data_sub_path(
     augment = args.augment
     domain = args.domain
     scan_type = args.scan_type
+    input_type = args.input_type
 
     # We need to know the input type and augmentation setting to get the right data
     if augment:
@@ -275,8 +275,18 @@ def get_data_sub_path(
     else:
         sub_path = f"{domain}_{'gated' if truth else 'ng'}_{scan_type}_{sample}.npy"
 
+    # If the input is PL we just add "_PL" to the end of the file name
+    if domain == "IMAG":
+        if input_type == "PL":
+            # Add "_PL" to the end of the file name
+            sub_path = sub_path.replace(".npy", "_PL.npy")
+        elif input_type != "FDK":
+            raise ValueError(
+                f"Input type {input_type} is not supported. Supported input types are: FDK, PL."
+            )
+
     log.debug(
-        f"Data type: {domain} domain {sample} data for {scan_type} {'with' if augment else 'without'} augmentation"
+        f"Data type: {domain} domain {sample} data for {scan_type} {'with' if augment else 'without'} augmentation {'with input type PL' if input_type == 'PL' else ''}"
     )
 
     return sub_path

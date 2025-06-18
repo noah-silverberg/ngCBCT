@@ -4,6 +4,12 @@ import os
 # Debugging mode
 DEBUG = False
 
+# GPU settings
+# Should be near the top to ensure they are set before anything else that might use CUDA
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+CUDA_DEVICE = "cuda:0"
+
 # Base directories (modify as needed)
 WORK_ROOT = r"D:/MitchellYu/NSG_CBCT/"
 
@@ -21,6 +27,7 @@ PD_model_name = (
 )
 PD_batch_size = 8
 PD_optimizer = "NAdam"
+PD_num_workers = 0
 
 # ID training settings
 ID_training_app = "train_app_MK6.TrainingApp"
@@ -29,6 +36,7 @@ ID_network_name = "IResNet"
 ID_model_name = f"{ID_network_name}_{model_version}_DS{data_version}_ID"
 ID_batch_size = 8
 ID_optimizer = "NAdam"
+ID_num_workers = 0
 
 # Directories derived from bases
 PHASE_DIR = os.path.join(WORK_ROOT, f"phase{phase}/")
@@ -39,9 +47,6 @@ FIGURE_DIR = os.path.join(PHASE_DIR, "figure/")
 DATA_DIR = os.path.join(
     PHASE_DIR, "data", f"DS{data_version}/"
 )  # for input data (gated and non-stop gated projections)
-
-# GPU settings
-CUDA_DEVICE = "cuda:0"
 
 # Default plotting clip ranges
 CLIP_LOW = 0

@@ -9,3 +9,4 @@ Data/
 *.synctex.gz
 *.bbl
 *.blg
+__pycache__/

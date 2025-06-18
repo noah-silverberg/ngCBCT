@@ -1,0 +1,284 @@
+import os
+import scipy.io
+import numpy as np
+
+import torch
+from torch.utils.data import Dataset
+
+
+def normalizeInputs(input_images):
+    # remove the first and last 16 rows and column for range computation
+    x_max = 496
+    x_min = 16
+    # remove the first and last 20 slices
+    c_max = 180
+    c_min = 20
+
+    range_max = np.max(input_images[x_min:x_max, x_min:x_max, c_min:c_max])
+    input_images = input_images[:, :, c_min:c_max]
+    input_images *= (1/range_max)
+
+    return input_images
+
+
+def normalizeInputsClip(input_images):
+
+    # remove the first and last 20 slices
+    c_max = 180
+    c_min = 20
+    input_images = input_images[:, :, c_min:c_max]
+
+    # clip input images to [0, 0.04]
+    input_images.clip(0, 0.04, input_images)
+
+    # normalize input to [0, 1]
+    input_images *= 25.
+
+    return input_images
+
+
+def data_augment_horizontal(input_images):
+
+    # flip horizontal
+    for i in range(input_images.shape[0]):
+        input_images[i] = input_images[i].flip(2)
+    return input_images
+
+
+def data_augment_vertical(input_images):
+
+    # flip vertical
+    for i in range(input_images.shape[0]):
+        input_images[i] = input_images[i].flip(1)
+    return input_images
+
+
+class CTSet(Dataset):
+    def __init__(self, base_dir):
+        super(CTSet, self).__init__()
+        # self.transforms = transforms  # make sure transforms has at leat ToTensor()
+        self.data = []  # store all data here
+        # go over all files in base_dir
+        for file in os.listdir(base_dir):
+            if file.endswith('FDK_full.mat'):
+                mat = scipy.io.loadmat(os.path.join(base_dir, file))
+                self.data.append(mat['u_FDK_full'])
+            elif file.endswith('FDK.mat'):
+                mat = scipy.io.loadmat(os.path.join(base_dir, file))
+                self.data.append(mat['u_FDK'])
+            elif file.endswith('HF_ns.mat'):
+                mat = scipy.io.loadmat(os.path.join(base_dir, file))
+                self.data.append(mat['reconFDK'])
+            elif file.endswith('u_PL.b1.iter200.mat'):
+                mat = scipy.io.loadmat(os.path.join(base_dir, file))
+                self.data.append(mat['u_PL'])
+            # ROI input files
+            elif file.endswith('FDK_ROI_fullView.mat'):
+                mat = scipy.io.loadmat(os.path.join(base_dir, file))
+                self.data.append(mat['u_FDK_ROI_fullView'])
+            elif file.endswith('FDK_ROI.mat'):
+                mat = scipy.io.loadmat(os.path.join(base_dir, file))
+                self.data.append(mat['u_FDK_ROI'])
+            elif file.endswith('u_PL_ROI.b1.mat'):
+                mat = scipy.io.loadmat(os.path.join(base_dir, file))
+                self.data.append(mat['u_PL_ROI'])
+            elif file.endswith('FF_ROI_ns.mat'):
+                mat = scipy.io.loadmat(os.path.join(base_dir, file))
+                self.data.append(mat['recon_FDK_ROI'])
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, index):
+        train_images = self.data[index]
+        # normalize inputs to [0, 1]
+        train_images = normalizeInputsClip(train_images)
+        train_images = torch.from_numpy(train_images).float()
+        # rearrange inputs to [index, row, column]
+        train_images = train_images.permute(2, 0, 1)
+        # nework expects [index, channel, row, column]
+        # CT scans only have 1 channel
+        train_images = torch.unsqueeze(train_images, 1)
+        return train_images
+
+
+class AugCTSet(Dataset):
+    def __init__(self, base_dir):
+        super(AugCTSet, self).__init__()
+        # self.transforms = transforms  # make sure transforms has at leat ToTensor()
+        self.data = []  # store all data here
+        # go over all files in base_dir
+        for file in os.listdir(base_dir):
+            if file.endswith('FDK_full.mat'):
+                mat = scipy.io.loadmat(os.path.join(base_dir, file))
+                self.data.append(mat['u_FDK_full'])
+            elif file.endswith('FDK.mat'):
+                mat = scipy.io.loadmat(os.path.join(base_dir, file))
+                self.data.append(mat['u_FDK'])
+            elif file.endswith('HF_ns.mat'):
+                mat = scipy.io.loadmat(os.path.join(base_dir, file))
+                self.data.append(mat['reconFDK'])
+            elif file.endswith('u_PL.b1.iter200.mat'):
+                mat = scipy.io.loadmat(os.path.join(base_dir, file))
+                self.data.append(mat['u_PL'])
+            # ROI input files
+            elif file.endswith('FDK_ROI_fullView.mat'):
+                mat = scipy.io.loadmat(os.path.join(base_dir, file))
+                self.data.append(mat['u_FDK_ROI_fullView'])
+            elif file.endswith('FDK_ROI.mat'):
+                mat = scipy.io.loadmat(os.path.join(base_dir, file))
+                self.data.append(mat['u_FDK_ROI'])
+            elif file.endswith('u_PL_ROI.b2.mat'):
+                mat = scipy.io.loadmat(os.path.join(base_dir, file))
+                self.data.append(mat['u_PL_ROI'])
+            elif file.endswith('FF_ROI_ns.mat'):
+                mat = scipy.io.loadmat(os.path.join(base_dir, file))
+                self.data.append(mat['recon_FDK_ROI'])
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, index):
+        train_images = self.data[index]
+        # normalize inputs to [0, 1]
+        train_images = normalizeInputsClip(train_images)
+        train_images = torch.from_numpy(train_images).float()
+        # rearrange inputs to [index, row, column]
+        train_images = train_images.permute(2, 0, 1)
+        # nework expects [index, channel, row, column]
+        # CT scans only have 1 channel
+        train_images = torch.unsqueeze(train_images, 1)
+        train_images_aug = torch.cat(
+            (train_images, train_images.flip(2), train_images.flip(3)))
+        return train_images_aug
+
+
+class TestScan(Dataset):
+    def __init__(self, test_file):
+        super(TestScan, self).__init__()
+        # self.transforms = transforms  # make sure transforms has at leat ToTensor()
+        self.data = []  # store all data here
+        # go over all files in base_dir
+        if test_file.endswith('FDK_full.mat'):
+            mat = scipy.io.loadmat(test_file)
+            self.data.append(mat['u_FDK_full'])
+        elif test_file.endswith('FDK.mat'):
+            mat = scipy.io.loadmat(test_file)
+            self.data.append(mat['u_FDK'])
+        elif test_file.endswith('HF_ns.mat'):
+            mat = scipy.io.loadmat(test_file)
+            self.data.append(mat['reconFDK'])
+        elif test_file.endswith('u_PL.b1.iter200.mat'):
+            mat = scipy.io.loadmat(test_file)
+            self.data.append(mat['u_PL'])
+        # ROI input files
+        elif test_file.endswith('FDK_ROI_fullView.mat'):
+            mat = scipy.io.loadmat(test_file)
+            self.data.append(mat['u_FDK_ROI_fullView'])
+        elif test_file.endswith('FDK_ROI.mat'):
+            mat = scipy.io.loadmat(test_file)
+            self.data.append(mat['u_FDK_ROI'])
+        elif test_file.endswith('u_PL_ROI.b1.mat'):
+            mat = scipy.io.loadmat(test_file)
+            self.data.append(mat['u_PL_ROI'])
+        elif test_file.endswith('FF_ROI_ns.mat'):
+            mat = scipy.io.loadmat(test_file)
+            self.data.append(mat['recon_FDK_ROI'])
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, index):
+        train_images = self.data[index]
+        # normalize inputs to [0, 1]
+        train_images = normalizeInputsClip(train_images)
+        train_images = torch.from_numpy(train_images).float()
+        # rearrange inputs to [index, row, column]
+        train_images = train_images.permute(2, 0, 1)
+        # nework expects [index, channel, row, column]
+        # CT scans only have 1 channel
+        train_images = torch.unsqueeze(train_images, 1)
+        return train_images
+
+
+class TrainSet(Dataset):
+    def __init__(self, base_dir, mode='train'):
+        super(TrainSet, self).__init__()
+
+        data_ver = 'data/DS1/'
+
+        self.mode = mode
+        if self.mode == 'train':
+            self.files_A = torch.load(
+                base_dir + data_ver + 'train/P01_HF01_full.pt')
+            self.files_B = torch.load(
+                base_dir + data_ver + 'train/P01_HF01_ns.pt')
+        elif self.mode == 'validation':
+            self.files_A = torch.load(
+                base_dir + data_ver + 'train/P01_HF01_full.pt')
+            self.files_B = torch.load(
+                base_dir + data_ver + 'train/P01_HF01_ns.pt')
+        # elif self.mode == 'test':
+        #     self.files_A = torch.load(
+        #         base_dir + data_ver + 'test/full.pt')
+        #     self.files_B = torch.load(base_dir + data_ver + 'test/ns.pt')
+
+    def __len__(self):
+        return max(len(self.files_A), len(self.files_B))
+
+    def __getitem__(self, index):
+        item_A = self.files_A[index]
+        item_B = self.files_B[index]
+        item_A = torch.unsqueeze(item_A, 0)
+        item_B = torch.unsqueeze(item_B, 0)
+        return {'A': item_A, 'B': item_B}
+
+
+class PrjSet(Dataset):
+    def __init__(self, base_dir):
+        super(PrjSet, self).__init__()
+        # self.transforms = transforms  # make sure transforms has at leat ToTensor()
+        self.data = []  # store all data here
+        # go over all files in base_dir
+        for file in os.listdir(base_dir):
+            if file.endswith('.HF.pt'):
+                self.prj = torch.load(os.path.join(base_dir, file))
+                self.data.append(self.prj)
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, index):
+        train_images = self.data[index]
+        return train_images
+
+
+class PairSet(Dataset):
+    def __init__(self, dataset1, dataset2):
+        self.dataset1 = dataset1
+        self.dataset2 = dataset2
+
+    def __getitem__(self, index):
+        x1 = self.dataset1[index]
+        x2 = self.dataset2[index]
+        return x1, x2
+
+    def __len__(self):
+        return len(self.dataset1)
+
+
+class PairNumpySet(Dataset):
+    def __init__(self, tensor_path_1, tensor_path_2):
+        # Load only metadata (not full tensors)
+        self.tensor_1 = np.load(tensor_path_1, mmap_mode='r')
+        self.tensor_2 = np.load(tensor_path_2, mmap_mode='r')
+        self.length = self.tensor_1.shape[0]  # Number of samples
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, idx):
+        # Load only the required slice
+        img1 = torch.tensor(self.tensor_1[idx]).float()
+        img2 = torch.tensor(self.tensor_2[idx]).float()
+        return img1, img2  # Return as a paired sample

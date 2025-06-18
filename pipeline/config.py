@@ -14,7 +14,7 @@ CUDA_DEVICE = "cuda:0"
 WORK_ROOT = os.path.abspath("./TESTING")
 
 # Data versions
-phase = "phase7"
+phase = "7"
 data_version = "12.2"  # e.g., '12'
 model_version = "MK6"
 
@@ -40,14 +40,14 @@ ID_num_workers = 0
 
 # Directories derived from bases
 PHASE_DATAVER_DIR = os.path.join(
-    WORK_ROOT, f"DS{data_version}", f"phase{phase}/"
+    WORK_ROOT, f"phase{phase}", f"DS{data_version}"
 )  # everything should go inside this directory
-MODEL_DIR = os.path.join(PHASE_DATAVER_DIR, "model/")  # for trained models
+MODEL_DIR = os.path.join(PHASE_DATAVER_DIR, "model")  # for trained models
 # LOSS_DIR = os.path.join(MODEL_DIR, "loss/") TODO
-RESULT_DIR = os.path.join(PHASE_DATAVER_DIR, "result/")  # for outputs of CNN
+RESULT_DIR = os.path.join(PHASE_DATAVER_DIR, "result")  # for outputs of CNN
 # FIGURE_DIR = os.path.join(PHASE_DATAVER_DIR, "figure/") TODO
-DATA_DIR = os.path.join(
-    PHASE_DATAVER_DIR, "data"
+PROJ_DIR = os.path.join(
+    PHASE_DATAVER_DIR, "proj_data"
 )  # for input data (gated and non-stop gated projections)
 
 # # Default plotting clip ranges

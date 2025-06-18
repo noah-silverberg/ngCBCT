@@ -1,8 +1,9 @@
 import torch
 import os
-from .config import DATA_DIR
+from .config import PROJ_DIR
 from .utils import ensure_dir
 from .dsets import PrjSet
+import logging
 
 
 def aggregate_saved_projections(scan_type: str, sample: str):
@@ -18,22 +19,30 @@ def aggregate_saved_projections(scan_type: str, sample: str):
         prj_ngcbct (torch.Tensor): Concatenated nonstop-gated projections tensor.
     """
     # Gated and nonstop-gated subdirectories
-    g_dir = os.path.join(DATA_DIR, "gated")
-    ng_dir = os.path.join(DATA_DIR, "ng")
-
-    # TODO we need some way to choose which datasets we actually want...
+    g_dir = os.path.join(PROJ_DIR, "gated")
+    ng_dir = os.path.join(PROJ_DIR, "ng")
 
     # Create ground truth dataset, and concatenate all scans into one tensor
     # along the H dimension (i.e., the dimension where we already stacked them before saving -- see "divide_sinogram" in proj.py)
-    truth_set = PrjSet(g_dir)
+    truth_set = PrjSet(g_dir, scan_type, sample)
+    logging.info(
+        f"Found {len(truth_set)} gated scans for scan type {scan_type} and sample {sample}"
+    )
+
     prj_gcbct = truth_set[0]
     for idx in range(1, len(truth_set)):
         prj_gcbct = torch.cat((prj_gcbct, truth_set[idx]), dim=0)
+    logging.info(f"Aggregated gated projections shape: {prj_gcbct.shape}")
 
     # Repeat for nonstop-gated projections
-    ns_set = PrjSet(ng_dir)
+    ns_set = PrjSet(ng_dir, scan_type, sample)
+    logging.info(
+        f"Found {len(ns_set)} nonstop-gated scans for scan type {scan_type} and sample {sample}"
+    )
+
     prj_ngcbct = ns_set[0]
     for idx in range(1, len(ns_set)):
         prj_ngcbct = torch.cat((prj_ngcbct, ns_set[idx]), dim=0)
+    logging.info(f"Aggregated nonstop-gated projections shape: {prj_ngcbct.shape}")
 
     return prj_gcbct, prj_ngcbct

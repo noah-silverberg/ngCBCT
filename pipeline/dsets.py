@@ -16,7 +16,7 @@ def normalizeInputs(input_images):
 
     range_max = np.max(input_images[x_min:x_max, x_min:x_max, c_min:c_max])
     input_images = input_images[:, :, c_min:c_max]
-    input_images *= (1/range_max)
+    input_images *= 1 / range_max
 
     return input_images
 
@@ -32,7 +32,7 @@ def normalizeInputsClip(input_images):
     input_images.clip(0, 0.04, input_images)
 
     # normalize input to [0, 1]
-    input_images *= 25.
+    input_images *= 25.0
 
     return input_images
 
@@ -60,31 +60,31 @@ class CTSet(Dataset):
         self.data = []  # store all data here
         # go over all files in base_dir
         for file in os.listdir(base_dir):
-            if file.endswith('FDK_full.mat'):
+            if file.endswith("FDK_full.mat"):
                 mat = scipy.io.loadmat(os.path.join(base_dir, file))
-                self.data.append(mat['u_FDK_full'])
-            elif file.endswith('FDK.mat'):
+                self.data.append(mat["u_FDK_full"])
+            elif file.endswith("FDK.mat"):
                 mat = scipy.io.loadmat(os.path.join(base_dir, file))
-                self.data.append(mat['u_FDK'])
-            elif file.endswith('HF_ns.mat'):
+                self.data.append(mat["u_FDK"])
+            elif file.endswith("HF_ns.mat"):
                 mat = scipy.io.loadmat(os.path.join(base_dir, file))
-                self.data.append(mat['reconFDK'])
-            elif file.endswith('u_PL.b1.iter200.mat'):
+                self.data.append(mat["reconFDK"])
+            elif file.endswith("u_PL.b1.iter200.mat"):
                 mat = scipy.io.loadmat(os.path.join(base_dir, file))
-                self.data.append(mat['u_PL'])
+                self.data.append(mat["u_PL"])
             # ROI input files
-            elif file.endswith('FDK_ROI_fullView.mat'):
+            elif file.endswith("FDK_ROI_fullView.mat"):
                 mat = scipy.io.loadmat(os.path.join(base_dir, file))
-                self.data.append(mat['u_FDK_ROI_fullView'])
-            elif file.endswith('FDK_ROI.mat'):
+                self.data.append(mat["u_FDK_ROI_fullView"])
+            elif file.endswith("FDK_ROI.mat"):
                 mat = scipy.io.loadmat(os.path.join(base_dir, file))
-                self.data.append(mat['u_FDK_ROI'])
-            elif file.endswith('u_PL_ROI.b1.mat'):
+                self.data.append(mat["u_FDK_ROI"])
+            elif file.endswith("u_PL_ROI.b1.mat"):
                 mat = scipy.io.loadmat(os.path.join(base_dir, file))
-                self.data.append(mat['u_PL_ROI'])
-            elif file.endswith('FF_ROI_ns.mat'):
+                self.data.append(mat["u_PL_ROI"])
+            elif file.endswith("FF_ROI_ns.mat"):
                 mat = scipy.io.loadmat(os.path.join(base_dir, file))
-                self.data.append(mat['recon_FDK_ROI'])
+                self.data.append(mat["recon_FDK_ROI"])
 
     def __len__(self):
         return len(self.data)
@@ -109,31 +109,31 @@ class AugCTSet(Dataset):
         self.data = []  # store all data here
         # go over all files in base_dir
         for file in os.listdir(base_dir):
-            if file.endswith('FDK_full.mat'):
+            if file.endswith("FDK_full.mat"):
                 mat = scipy.io.loadmat(os.path.join(base_dir, file))
-                self.data.append(mat['u_FDK_full'])
-            elif file.endswith('FDK.mat'):
+                self.data.append(mat["u_FDK_full"])
+            elif file.endswith("FDK.mat"):
                 mat = scipy.io.loadmat(os.path.join(base_dir, file))
-                self.data.append(mat['u_FDK'])
-            elif file.endswith('HF_ns.mat'):
+                self.data.append(mat["u_FDK"])
+            elif file.endswith("HF_ns.mat"):
                 mat = scipy.io.loadmat(os.path.join(base_dir, file))
-                self.data.append(mat['reconFDK'])
-            elif file.endswith('u_PL.b1.iter200.mat'):
+                self.data.append(mat["reconFDK"])
+            elif file.endswith("u_PL.b1.iter200.mat"):
                 mat = scipy.io.loadmat(os.path.join(base_dir, file))
-                self.data.append(mat['u_PL'])
+                self.data.append(mat["u_PL"])
             # ROI input files
-            elif file.endswith('FDK_ROI_fullView.mat'):
+            elif file.endswith("FDK_ROI_fullView.mat"):
                 mat = scipy.io.loadmat(os.path.join(base_dir, file))
-                self.data.append(mat['u_FDK_ROI_fullView'])
-            elif file.endswith('FDK_ROI.mat'):
+                self.data.append(mat["u_FDK_ROI_fullView"])
+            elif file.endswith("FDK_ROI.mat"):
                 mat = scipy.io.loadmat(os.path.join(base_dir, file))
-                self.data.append(mat['u_FDK_ROI'])
-            elif file.endswith('u_PL_ROI.b2.mat'):
+                self.data.append(mat["u_FDK_ROI"])
+            elif file.endswith("u_PL_ROI.b2.mat"):
                 mat = scipy.io.loadmat(os.path.join(base_dir, file))
-                self.data.append(mat['u_PL_ROI'])
-            elif file.endswith('FF_ROI_ns.mat'):
+                self.data.append(mat["u_PL_ROI"])
+            elif file.endswith("FF_ROI_ns.mat"):
                 mat = scipy.io.loadmat(os.path.join(base_dir, file))
-                self.data.append(mat['recon_FDK_ROI'])
+                self.data.append(mat["recon_FDK_ROI"])
 
     def __len__(self):
         return len(self.data)
@@ -149,7 +149,8 @@ class AugCTSet(Dataset):
         # CT scans only have 1 channel
         train_images = torch.unsqueeze(train_images, 1)
         train_images_aug = torch.cat(
-            (train_images, train_images.flip(2), train_images.flip(3)))
+            (train_images, train_images.flip(2), train_images.flip(3))
+        )
         return train_images_aug
 
 
@@ -159,31 +160,31 @@ class TestScan(Dataset):
         # self.transforms = transforms  # make sure transforms has at leat ToTensor()
         self.data = []  # store all data here
         # go over all files in base_dir
-        if test_file.endswith('FDK_full.mat'):
+        if test_file.endswith("FDK_full.mat"):
             mat = scipy.io.loadmat(test_file)
-            self.data.append(mat['u_FDK_full'])
-        elif test_file.endswith('FDK.mat'):
+            self.data.append(mat["u_FDK_full"])
+        elif test_file.endswith("FDK.mat"):
             mat = scipy.io.loadmat(test_file)
-            self.data.append(mat['u_FDK'])
-        elif test_file.endswith('HF_ns.mat'):
+            self.data.append(mat["u_FDK"])
+        elif test_file.endswith("HF_ns.mat"):
             mat = scipy.io.loadmat(test_file)
-            self.data.append(mat['reconFDK'])
-        elif test_file.endswith('u_PL.b1.iter200.mat'):
+            self.data.append(mat["reconFDK"])
+        elif test_file.endswith("u_PL.b1.iter200.mat"):
             mat = scipy.io.loadmat(test_file)
-            self.data.append(mat['u_PL'])
+            self.data.append(mat["u_PL"])
         # ROI input files
-        elif test_file.endswith('FDK_ROI_fullView.mat'):
+        elif test_file.endswith("FDK_ROI_fullView.mat"):
             mat = scipy.io.loadmat(test_file)
-            self.data.append(mat['u_FDK_ROI_fullView'])
-        elif test_file.endswith('FDK_ROI.mat'):
+            self.data.append(mat["u_FDK_ROI_fullView"])
+        elif test_file.endswith("FDK_ROI.mat"):
             mat = scipy.io.loadmat(test_file)
-            self.data.append(mat['u_FDK_ROI'])
-        elif test_file.endswith('u_PL_ROI.b1.mat'):
+            self.data.append(mat["u_FDK_ROI"])
+        elif test_file.endswith("u_PL_ROI.b1.mat"):
             mat = scipy.io.loadmat(test_file)
-            self.data.append(mat['u_PL_ROI'])
-        elif test_file.endswith('FF_ROI_ns.mat'):
+            self.data.append(mat["u_PL_ROI"])
+        elif test_file.endswith("FF_ROI_ns.mat"):
             mat = scipy.io.loadmat(test_file)
-            self.data.append(mat['recon_FDK_ROI'])
+            self.data.append(mat["recon_FDK_ROI"])
 
     def __len__(self):
         return len(self.data)
@@ -202,22 +203,18 @@ class TestScan(Dataset):
 
 
 class TrainSet(Dataset):
-    def __init__(self, base_dir, mode='train'):
+    def __init__(self, base_dir, mode="train"):
         super(TrainSet, self).__init__()
 
-        data_ver = 'data/DS1/'
+        data_ver = "data/DS1/"
 
         self.mode = mode
-        if self.mode == 'train':
-            self.files_A = torch.load(
-                base_dir + data_ver + 'train/P01_HF01_full.pt')
-            self.files_B = torch.load(
-                base_dir + data_ver + 'train/P01_HF01_ns.pt')
-        elif self.mode == 'validation':
-            self.files_A = torch.load(
-                base_dir + data_ver + 'train/P01_HF01_full.pt')
-            self.files_B = torch.load(
-                base_dir + data_ver + 'train/P01_HF01_ns.pt')
+        if self.mode == "train":
+            self.files_A = torch.load(base_dir + data_ver + "train/P01_HF01_full.pt")
+            self.files_B = torch.load(base_dir + data_ver + "train/P01_HF01_ns.pt")
+        elif self.mode == "validation":
+            self.files_A = torch.load(base_dir + data_ver + "train/P01_HF01_full.pt")
+            self.files_B = torch.load(base_dir + data_ver + "train/P01_HF01_ns.pt")
         # elif self.mode == 'test':
         #     self.files_A = torch.load(
         #         base_dir + data_ver + 'test/full.pt')
@@ -231,17 +228,17 @@ class TrainSet(Dataset):
         item_B = self.files_B[index]
         item_A = torch.unsqueeze(item_A, 0)
         item_B = torch.unsqueeze(item_B, 0)
-        return {'A': item_A, 'B': item_B}
+        return {"A": item_A, "B": item_B}
 
 
 class PrjSet(Dataset):
-    def __init__(self, base_dir):
+    def __init__(self, base_dir, scan_type, sample):
         super(PrjSet, self).__init__()
         # self.transforms = transforms  # make sure transforms has at leat ToTensor()
         self.data = []  # store all data here
         # go over all files in base_dir
         for file in os.listdir(base_dir):
-            if file.endswith('.HF.pt'):
+            if file.startswith(f"{scan_type}_") and file.endswith(f"_{sample}.pt"):
                 self.prj = torch.load(os.path.join(base_dir, file))
                 self.data.append(self.prj)
 
@@ -270,8 +267,8 @@ class PairSet(Dataset):
 class PairNumpySet(Dataset):
     def __init__(self, tensor_path_1, tensor_path_2):
         # Load only metadata (not full tensors)
-        self.tensor_1 = np.load(tensor_path_1, mmap_mode='r')
-        self.tensor_2 = np.load(tensor_path_2, mmap_mode='r')
+        self.tensor_1 = np.load(tensor_path_1, mmap_mode="r")
+        self.tensor_2 = np.load(tensor_path_2, mmap_mode="r")
         self.length = self.tensor_1.shape[0]  # Number of samples
 
     def __len__(self):

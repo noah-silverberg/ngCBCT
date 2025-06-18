@@ -237,7 +237,7 @@ class PrjSet(Dataset):
         # self.transforms = transforms  # make sure transforms has at leat ToTensor()
         self.data = []  # store all data here
         # go over all files in base_dir
-        for file in os.listdir(base_dir):
+        for file in sorted(os.listdir(base_dir)):
             if file.startswith(f"{scan_type}_") and file.endswith(f"_{sample}.pt"):
                 self.prj = torch.load(os.path.join(base_dir, file))
                 self.data.append(self.prj)

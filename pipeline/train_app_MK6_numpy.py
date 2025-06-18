@@ -1,196 +1,230 @@
-import argparse
-import datetime
-import time
-import math
 import os
-import sys
-import gc
-
-import numpy as np
-
-from torch.utils.tensorboard import SummaryWriter
-
-import torch
-import torch.nn as nn
-from torch.optim import SGD, Adam, NAdam
-from torch.utils.data import DataLoader
-
-from dsets import PairSet, PairNumpySet
-import logging
-
-from network_instance import IResNet, FBPCONVNet
-
-from torchmetrics.image import PeakSignalNoiseRatio
-from torchmetrics.image import StructuralSimilarityIndexMeasure
-
-psnr = PeakSignalNoiseRatio()
-ssim = StructuralSimilarityIndexMeasure(data_range=1.0)
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = "1"  # specify which GPU(s) to be used
 
-log = logging.getLogger(__name__)
-# log.setLevel(logging.WARN)
-log.setLevel(logging.INFO)
-log.setLevel(logging.DEBUG)
+import argparse
+import datetime
+import time
+import math
+import sys
+import gc
+import numpy as np
+from torch.utils.tensorboard import SummaryWriter
+import torch
+import torch.nn as nn
+from torch.optim import SGD, Adam, NAdam
+from torch.utils.data import DataLoader
+from .dsets import PairSet, PairNumpySet, CTSet
+from . import network_instance
+import logging
+from torchmetrics.image import PeakSignalNoiseRatio
+from torchmetrics.image import StructuralSimilarityIndexMeasure
 
-# Used for computeBatchLoss and logMetrics to index into metrics_t/metrics_a
-METRICS_LABEL_NDX = 0
-METRICS_PRED_NDX = 1
-METRICS_LOSS_NDX = 2
-METRICS_SIZE = 3
+# Set up logging
+log = logging.getLogger(__name__)
+
+use_cuda = torch.cuda.is_available()
+if not use_cuda:
+    raise RuntimeError(
+        "CUDA is not available. Please check your PyTorch installation or GPU setup."
+    )
+device = torch.device("cuda:0" if use_cuda else "cpu")
+log.info("Using CUDA; {} devices.".format(torch.cuda.device_count()))
+
+
+def parse_sys_argv(sys_argv=None):
+    """Parse command line arguments for the training application."""
+    if sys_argv is None:
+        sys_argv = sys.argv[1:]
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--epoch",
+        help="Number of epochs to train for",
+        default=1,
+        type=int,
+    )
+    parser.add_argument(
+        "--network",
+        help="Network for training",
+        default="FBPCONVNet",
+        type=str,
+    )
+    parser.add_argument("--model_name", type=str, default="test")
+    parser.add_argument(
+        "--data_ver",
+        help="Dataset version",
+        type=str,
+    )
+    parser.add_argument("--optimizer", default="SGD", type=str)
+    parser.add_argument("--shuffle", default=True, type=bool)
+    parser.add_argument("--DEBUG", default=False, type=bool)
+    parser.add_argument(
+        "--batch_size",
+        help="Batch size to use for training",
+        default=8,
+        type=int,
+    )
+    parser.add_argument(
+        "--num_workers",
+        help="Number of worker processes for background data loading",
+        default=0,
+        type=int,
+    )
+
+    # --------------------------
+
+    parser.add_argument(
+        "--data_path", default="D:/MitchellYu/NSG_CBCT/phase4/data/", type=str
+    )
+
+    parser.add_argument("--input_type", default="FDK", type=str)
+    parser.add_argument("--pl_ver", default=1, type=int)
+
+    parser.add_argument("--reload_data", default=False, type=bool)
+    parser.add_argument("--augment", default=False, type=bool)
+    parser.add_argument(
+        "--learning_rate_Adam",
+        help="Learning rate for Adam",
+        default=1e-3,
+        type=float,
+    )
+    parser.add_argument(
+        "--learning_rate_NAdam",
+        help="Learning rate for NAdam",
+        default=1e-3,
+        type=float,
+    )
+    parser.add_argument(
+        "--betas_NAdam",
+        help="Betas for NAdam",
+        default=(0.9, 0.999),
+        type=tuple,
+    )
+    parser.add_argument(
+        "--momentum_decay_NAdam",
+        help="Momentum decay for NAdam",
+        default=4e-4,
+        type=float,
+    )
+    parser.add_argument("--grad_clip", default=True, type=bool)
+    parser.add_argument(
+        "--grad_max",
+        help="",
+        default=0.01,
+        type=float,
+    )
+
+    # SGD optimizer parameters
+    parser.add_argument(
+        "--learning_rate_SGD",
+        help="Learning rate for SGD",
+        default=np.logspace(-2, -3, 20),
+        type=tuple,
+    )
+    parser.add_argument(
+        "--momentum_SGD",
+        help="",
+        default=0.99,
+        type=float,
+    )
+    parser.add_argument(
+        "--weight_decay_SGD",
+        help="",
+        default=1e-8,
+        type=float,
+    )
+
+    parser.add_argument("--model_dir", type=str, default="./model/")
+
+    parser.add_argument("--checkpoint_save_step", help="", default=10, type=int)
+    parser.add_argument("--checkpoint_dir", type=str, default="./checkpoints/")
+
+    parser.add_argument("--tensor_board", default=False, type=bool)
+
+    parser.add_argument(
+        "comment",
+        help="Comment suffix for Tensorboard run.",
+        nargs="?",
+        default="dwlpt",
+    )
+
+    return parser.parse_args(sys_argv)
+
+
+def init_model(cli_args):
+    """Initialize the CNN model and move it to the GPU."""
+    model = getattr(network_instance, cli_args.network)()
+    log.info(f"Network Selected: {cli_args.network}")
+
+    model = model.to(device)
+
+    return model
+
+
+def init_loss(cli_args):
+    return nn.SmoothL1Loss()
+
+
+def init_optimizer(cli_args, model):
+    if cli_args.optimizer == "SGD":
+        log.info(
+            f"Optimizer: SGD with learning rate {cli_args.learning_rate_SGD}, momentum {cli_args.momentum_SGD}, weight decay {cli_args.weight_decay_SGD}"
+        )
+        return SGD(
+            model.parameters(),
+            lr=cli_args.learning_rate_SGD,
+            momentum=cli_args.momentum_SGD,
+            weight_decay=cli_args.weight_decay_SGD,
+        )
+    elif cli_args.optimizer == "Adam":
+        log.info(f"Optimizer: Adam with learning rate {cli_args.learning_rate_Adam}")
+        return Adam(model.parameters(), lr=cli_args.learning_rate_Adam)
+    elif cli_args.optimizer == "NAdam":
+        log.info(
+            f"Optimizer: NAdam with learning rate {cli_args.learning_rate_NAdam}, betas {cli_args.betas_NAdam}, momentum_decay {cli_args.momentum_decay_NAdam}"
+        )
+        return NAdam(
+            model.parameters(),
+            lr=cli_args.learning_rate_NAdam,
+            betas=cli_args.betas_NAdam,
+            momentum_decay=cli_args.momentum_decay_NAdam,
+        )
+
+    raise NotImplementedError(
+        f"Optimizer {cli_args.optimizer} is not implemented. Supported optimizers are: SGD, Adam, NAdam."
+    )
+
+
+def init_tensorboard_writers(cli_args, time_str):
+    """Initialize TensorBoard writers for training and validation."""
+    log_dir = os.path.join("runs", cli_args.model_name, time_str)
+
+    trn_writer = SummaryWriter(log_dir=log_dir + "-trn_cls-" + cli_args.comment)
+    val_writer = SummaryWriter(log_dir=log_dir + "-val_cls-" + cli_args.comment)
+
+    return trn_writer, val_writer
 
 
 class TrainingApp:
     def __init__(self, sys_argv=None):
-        if sys_argv is None:
-            sys_argv = sys.argv[1:]
+        # Parse command line arguments
+        self.cli_args = parse_sys_argv(sys_argv)
 
-        parser = argparse.ArgumentParser()
-        parser.add_argument(
-            "--epoch",
-            help="Number of epochs to train for",
-            default=1,
-            type=int,
-        )
-        parser.add_argument(
-            "--network",
-            help="Network for training",
-            default="FBPCONVNet",
-            type=str,
-        )
-        parser.add_argument("--model_name", type=str, default="test")
-        parser.add_argument(
-            "--data_ver",
-            help="Dataset version",
-            type=str,
-        )
-        parser.add_argument("--optimizer", default="SGD", type=str)
-        parser.add_argument("--shuffle", default=True, type=bool)
-        parser.add_argument("--DEBUG", default=False, type=bool)
-        parser.add_argument(
-            "--batch_size",
-            help="Batch size to use for training",
-            default=8,
-            type=int,
-        )
-        parser.add_argument(
-            "--num_workers",
-            help="Number of worker processes for background data loading",
-            default=0,
-            type=int,
-        )
+        # Set logging level
+        if self.cli_args.DEBUG:
+            log.setLevel(logging.INFO)
+        else:
+            log.setLevel(logging.WARNING)
 
-        # --------------------------
-
-        parser.add_argument(
-            "--data_path", default="D:/MitchellYu/NSG_CBCT/phase4/data/", type=str
-        )
-
-        parser.add_argument("--input_type", default="FDK", type=str)
-        parser.add_argument("--pl_ver", default=1, type=int)
-
-        parser.add_argument("--reload_data", default=False, type=bool)
-        parser.add_argument("--augment", default=False, type=bool)
-        parser.add_argument(
-            "--learning_rate",
-            help="Learning rate for SGD",
-            default=np.logspace(-2, -3, 20),
-            type=tuple,
-        )
-        parser.add_argument("--grad_clip", default=True, type=bool)
-        parser.add_argument(
-            "--grad_max",
-            help="",
-            default=0.01,
-            type=float,
-        )
-        parser.add_argument(
-            "--momentum",
-            help="",
-            default=0.99,
-            type=float,
-        )
-
-        parser.add_argument("--model_dir", type=str, default="./model/")
-
-        parser.add_argument("--checkpoint_save_step", help="", default=10, type=int)
-        parser.add_argument("--checkpoint_dir", type=str, default="./checkpoints/")
-
-        parser.add_argument("--tensor_board", default=False, type=bool)
-
-        parser.add_argument(
-            "comment",
-            help="Comment suffix for Tensorboard run.",
-            nargs="?",
-            default="dwlpt",
-        )
-
-        self.cli_args = parser.parse_args(sys_argv)
+        # Current time string for tensorboard
         self.time_str = datetime.datetime.now().strftime("%Y-%m-%d_%H.%M.%S")
 
-        self.trn_writer = None
-        self.val_writer = None
-        self.totalTrainingSamples_count = 0
-
-        self.use_cuda = torch.cuda.is_available()
-        self.device = torch.device("cuda:0" if self.use_cuda else "cpu")
-
-        self.model = self.initModel()
-        self.criterion = self.initCriterion()
-
-    def initModel(self):
-        log.info("Loading CNN...")
-        log.info(f"Network Selected: {self.cli_args.network}")
-
-        if self.cli_args.network == "FBPCONVNet":
-            model = FBPCONVNet()
-        elif self.cli_args.network == "AttUNet":
-            model = AttUNet()
-        elif self.cli_args.network == "UNet":
-            model = UNet()
-        elif self.cli_args.network == "R2UNet":
-            model = R2UNet()
-        elif self.cli_args.network == "R2AttUNet":
-            model = R2AttUNet()
-        elif self.cli_args.network == "IResNet":
-            model = IResNet()
-
-        if self.use_cuda:
-            log.info("Using CUDA; {} devices.".format(torch.cuda.device_count()))
-            """
-            if torch.cuda.device_count() > 1:
-                model = nn.DataParallel(model)
-            """
-            model = model.to(self.device)
-        return model
-
-    def initOptimizer(self, learning_rate):
-        if self.cli_args.optimizer == "SGD":
-            if self.cli_args.DEBUG:
-                log.info("Optimizer: SGD")
-            return SGD(
-                self.model.parameters(),
-                lr=learning_rate,
-                momentum=0.99,
-                weight_decay=1e-8,
-            )
-        elif self.cli_args.optimizer == "Adam":
-            if self.cli_args.DEBUG:
-                log.info("Optimizer: Adam")
-            return Adam(self.model.parameters(), lr=0.001)
-        elif self.cli_args.optimizer == "NAdam":
-            if self.cli_args.DEBUG:
-                log.info("Optimizer: NAdam")
-            return NAdam(
-                self.model.parameters(), lr=1e-4, betas=(0.9, 0.99), momentum_decay=4e-4
-            )
-        else:
-            log.info("This optimizer is not supported yet!")
-            # return SGD(self.model.parameters(), lr=learning_rate, momentum=0.99, weight_decay=1e-8)
-
-    def initCriterion(self):
-        return nn.SmoothL1Loss()
+        # Initialize model, loss, and optimizer
+        self.model = init_model(self.cli_args)
+        self.criterion = init_loss(self.cli_args)
+        self.optimizer = init_optimizer(self.cli_args, self.model)
 
     def initTrainDl(self):
         if self.cli_args.reload_data:
@@ -408,17 +442,6 @@ class TrainingApp:
 
         return val_dl
 
-    def initTensorboardWriters(self):
-        if self.trn_writer is None:
-            log_dir = os.path.join("runs", self.cli_args.model_name, self.time_str)
-
-            self.trn_writer = SummaryWriter(
-                log_dir=log_dir + "-trn_cls-" + self.cli_args.comment
-            )
-            self.val_writer = SummaryWriter(
-                log_dir=log_dir + "-val_cls-" + self.cli_args.comment
-            )
-
     def main(self):
         log.info("Starting {}, {}".format(type(self).__name__, self.cli_args))
 
@@ -426,7 +449,9 @@ class TrainingApp:
         val_dl = self.initValDl()
 
         if self.cli_args.tensor_board:
-            self.initTensorboardWriters()
+            self.trn_writer, self.val_writer = init_tensorboard_writers(
+                self.cli_args, self.time_str
+            )
 
         # trainning settings
         n_epoch = self.cli_args.epoch

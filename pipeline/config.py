@@ -30,7 +30,7 @@ PD_optimizer = "NAdam"
 PD_num_workers = 0
 
 # ID training settings
-ID_training_app = "train_app_MK6.TrainingApp"
+ID_training_app = "train_app_MK6_numpy.TrainingApp"
 ID_epochs = 50
 ID_network_name = "IResNet"
 ID_model_name = f"{ID_network_name}_{model_version}_DS{data_version}_ID"

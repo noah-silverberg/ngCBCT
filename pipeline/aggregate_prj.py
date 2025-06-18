@@ -25,6 +25,13 @@ def aggregate_saved_projections(scan_type: str, sample: str):
     # Create ground truth dataset, and concatenate all scans into one tensor
     # along the H dimension (i.e., the dimension where we already stacked them before saving -- see "divide_sinogram" in proj.py)
     truth_set = PrjSet(g_dir, scan_type, sample)
+
+    # Ensure scans were found
+    if len(truth_set) == 0:
+        raise ValueError(
+            f"No gated scans found for scan type {scan_type} and sample {sample}"
+        )
+
     logging.info(
         f"Found {len(truth_set)} gated scans for scan type {scan_type} and sample {sample}"
     )
@@ -36,6 +43,13 @@ def aggregate_saved_projections(scan_type: str, sample: str):
 
     # Repeat for nonstop-gated projections
     ns_set = PrjSet(ng_dir, scan_type, sample)
+
+    # Ensure scans were found
+    if len(ns_set) == 0:
+        raise ValueError(
+            f"No nonstop-gated scans found for scan type {scan_type} and sample {sample}"
+        )
+
     logging.info(
         f"Found {len(ns_set)} nonstop-gated scans for scan type {scan_type} and sample {sample}"
     )

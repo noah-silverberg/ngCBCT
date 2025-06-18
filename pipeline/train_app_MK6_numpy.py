@@ -15,15 +15,14 @@ import torch.nn as nn
 from torch.optim import SGD, Adam, NAdam
 from torch.utils.data import DataLoader
 
-from util.util import enumerateWithEstimate
 from dsets import PairSet, PairNumpySet
-from util.logconf import logging
+import logging
 
-from network import FBPCONVNet
-from network_instance import IResNet
+from network_instance import IResNet, FBPCONVNet
 
 from torchmetrics.image import PeakSignalNoiseRatio
 from torchmetrics.image import StructuralSimilarityIndexMeasure
+
 psnr = PeakSignalNoiseRatio()
 ssim = StructuralSimilarityIndexMeasure(data_range=1.0)
 
@@ -48,120 +47,87 @@ class TrainingApp:
             sys_argv = sys.argv[1:]
 
         parser = argparse.ArgumentParser()
-        parser.add_argument('--num_workers',
-                            help='Number of worker processes for background data loading',
-                            default=0,
-                            type=int,
-                            )
-        parser.add_argument('--batch_size',
-                            help='Batch size to use for training',
-                            default=8,
-                            type=int,
-                            )
-        parser.add_argument('--epoch',
-                            help='Number of epochs to train for',
-                            default=1,
-                            type=int,
-                            )
+        parser.add_argument(
+            "--epoch",
+            help="Number of epochs to train for",
+            default=1,
+            type=int,
+        )
+        parser.add_argument(
+            "--network",
+            help="Network for training",
+            default="FBPCONVNet",
+            type=str,
+        )
+        parser.add_argument("--model_name", type=str, default="test")
+        parser.add_argument(
+            "--data_ver",
+            help="Dataset version",
+            type=str,
+        )
+        parser.add_argument("--optimizer", default="SGD", type=str)
+        parser.add_argument("--shuffle", default=True, type=bool)
+        parser.add_argument("--DEBUG", default=False, type=bool)
+        parser.add_argument(
+            "--batch_size",
+            help="Batch size to use for training",
+            default=8,
+            type=int,
+        )
+        parser.add_argument(
+            "--num_workers",
+            help="Number of worker processes for background data loading",
+            default=0,
+            type=int,
+        )
 
-        parser.add_argument('--network',
-                            help='Network for training',
-                            default='FBPCONVNet',
-                            type=str,
-                            )
+        # --------------------------
 
-        parser.add_argument('--work_path',
-                            help='',
-                            default='D:/MitchellYu/NSG_CBCT/phase4/',
-                            type=str,
-                            )
-        parser.add_argument('--data_path',
-                            default='D:/MitchellYu/NSG_CBCT/phase4/data/',
-                            type=str)
+        parser.add_argument(
+            "--data_path", default="D:/MitchellYu/NSG_CBCT/phase4/data/", type=str
+        )
 
-        parser.add_argument('--data_ver',
-                            help='Dataset version',
-                            type=str,
-                            )
-        parser.add_argument('--input_type',
-                            default='FDK',
-                            type=str)
-        parser.add_argument('--pl_ver',
-                            default=1,
-                            type=int)
+        parser.add_argument("--input_type", default="FDK", type=str)
+        parser.add_argument("--pl_ver", default=1, type=int)
 
-        parser.add_argument('--reload_data',
-                            default=False,
-                            type=bool)
-        parser.add_argument('--shuffle',
-                            default=True,
-                            type=bool)
-        parser.add_argument('--augment',
-                            default=False,
-                            type=bool)
-        parser.add_argument('--optimizer',
-                            default='SGD',
-                            type=str)
-        parser.add_argument('--learning_rate',
-                            help='Learning rate for SGD',
-                            default=np.logspace(-2, -3, 20),
-                            type=tuple,
-                            )
-        parser.add_argument('--grad_clip',
-                            default=True,
-                            type=bool)
-        parser.add_argument('--grad_max',
-                            help='',
-                            default=0.01,
-                            type=float,
-                            )
-        parser.add_argument('--momentum',
-                            help='',
-                            default=0.99,
-                            type=float,
-                            )
+        parser.add_argument("--reload_data", default=False, type=bool)
+        parser.add_argument("--augment", default=False, type=bool)
+        parser.add_argument(
+            "--learning_rate",
+            help="Learning rate for SGD",
+            default=np.logspace(-2, -3, 20),
+            type=tuple,
+        )
+        parser.add_argument("--grad_clip", default=True, type=bool)
+        parser.add_argument(
+            "--grad_max",
+            help="",
+            default=0.01,
+            type=float,
+        )
+        parser.add_argument(
+            "--momentum",
+            help="",
+            default=0.99,
+            type=float,
+        )
 
-        parser.add_argument('--model_dir',
-                            type=str,
-                            default='./model/')
-        parser.add_argument('--model_name',
-                            type=str,
-                            default='test')
+        parser.add_argument("--model_dir", type=str, default="./model/")
 
-        parser.add_argument('--sample_step',
-                            help='',
-                            default=100,
-                            type=int)
-        parser.add_argument('--sample_dir',
-                            help='',
-                            default='./samples/',
-                            type=str)
-        parser.add_argument('--checkpoint_save_step',
-                            help='',
-                            default=10,
-                            type=int)
-        parser.add_argument('--checkpoint_dir', type=str,
-                            default='./checkpoints/')
+        parser.add_argument("--checkpoint_save_step", help="", default=10, type=int)
+        parser.add_argument("--checkpoint_dir", type=str, default="./checkpoints/")
 
-        parser.add_argument('--tensor_board',
-                            default=False,
-                            type=bool)
-        parser.add_argument('--tb-prefix',
-                            default='FBPCONVNet',
-                            help='Data prefix to use for Tensorboard run. Defaults to chapter.',
-                            )
+        parser.add_argument("--tensor_board", default=False, type=bool)
 
-        parser.add_argument('comment',
-                            help='Comment suffix for Tensorboard run.',
-                            nargs='?',
-                            default='dwlpt',
-                            )
+        parser.add_argument(
+            "comment",
+            help="Comment suffix for Tensorboard run.",
+            nargs="?",
+            default="dwlpt",
+        )
 
-        parser.add_argument('--DEBUG',
-                            default=False,
-                            type=bool)
         self.cli_args = parser.parse_args(sys_argv)
-        self.time_str = datetime.datetime.now().strftime('%Y-%m-%d_%H.%M.%S')
+        self.time_str = datetime.datetime.now().strftime("%Y-%m-%d_%H.%M.%S")
 
         self.trn_writer = None
         self.val_writer = None
@@ -174,25 +140,24 @@ class TrainingApp:
         self.criterion = self.initCriterion()
 
     def initModel(self):
-        log.info('Loading CNN...')
-        log.info(f'Network Selected: {self.cli_args.network}')
+        log.info("Loading CNN...")
+        log.info(f"Network Selected: {self.cli_args.network}")
 
-        if self.cli_args.network == 'FBPCONVNet':
+        if self.cli_args.network == "FBPCONVNet":
             model = FBPCONVNet()
-        elif self.cli_args.network == 'AttUNet':
+        elif self.cli_args.network == "AttUNet":
             model = AttUNet()
-        elif self.cli_args.network == 'UNet':
+        elif self.cli_args.network == "UNet":
             model = UNet()
-        elif self.cli_args.network == 'R2UNet':
+        elif self.cli_args.network == "R2UNet":
             model = R2UNet()
-        elif self.cli_args.network == 'R2AttUNet':
+        elif self.cli_args.network == "R2AttUNet":
             model = R2AttUNet()
-        elif self.cli_args.network == 'IResNet':
+        elif self.cli_args.network == "IResNet":
             model = IResNet()
 
         if self.use_cuda:
-            log.info('Using CUDA; {} devices.'.format(
-                torch.cuda.device_count()))
+            log.info("Using CUDA; {} devices.".format(torch.cuda.device_count()))
             """
             if torch.cuda.device_count() > 1:
                 model = nn.DataParallel(model)
@@ -201,20 +166,27 @@ class TrainingApp:
         return model
 
     def initOptimizer(self, learning_rate):
-        if self.cli_args.optimizer == 'SGD':
+        if self.cli_args.optimizer == "SGD":
             if self.cli_args.DEBUG:
-                log.info('Optimizer: SGD')
-            return SGD(self.model.parameters(), lr=learning_rate, momentum=0.99, weight_decay=1e-8)
-        elif self.cli_args.optimizer == 'Adam':
+                log.info("Optimizer: SGD")
+            return SGD(
+                self.model.parameters(),
+                lr=learning_rate,
+                momentum=0.99,
+                weight_decay=1e-8,
+            )
+        elif self.cli_args.optimizer == "Adam":
             if self.cli_args.DEBUG:
-                log.info('Optimizer: Adam')
+                log.info("Optimizer: Adam")
             return Adam(self.model.parameters(), lr=0.001)
-        elif self.cli_args.optimizer == 'NAdam':
+        elif self.cli_args.optimizer == "NAdam":
             if self.cli_args.DEBUG:
-                log.info('Optimizer: NAdam')
-            return NAdam(self.model.parameters(), lr=1e-4, betas=(0.9, 0.99), momentum_decay=4e-4)
+                log.info("Optimizer: NAdam")
+            return NAdam(
+                self.model.parameters(), lr=1e-4, betas=(0.9, 0.99), momentum_decay=4e-4
+            )
         else:
-            log.info('This optimizer is not supported yet!')
+            log.info("This optimizer is not supported yet!")
             # return SGD(self.model.parameters(), lr=learning_rate, momentum=0.99, weight_decay=1e-8)
 
     def initCriterion(self):
@@ -222,73 +194,99 @@ class TrainingApp:
 
     def initTrainDl(self):
         if self.cli_args.reload_data:
-            log.info('Reloading Training Data Sets...')
-            log.info('Augmentation Not Supported...')
-            if self.cli_args.input_type == 'FDK':
+            log.info("Reloading Training Data Sets...")
+            log.info("Augmentation Not Supported...")
+            if self.cli_args.input_type == "FDK":
                 if self.cli_args.DEBUG:
-                    log.info(f'Training input type: FDK')
-                train_sets = CTSet(self.cli_args.data_path +
-                                   f'DS{self.cli_args.data_ver}/' + 'train/ns/')
-            elif self.cli_args.input_type == 'PL':
+                    log.info(f"Training input type: FDK")
+                train_sets = CTSet(
+                    self.cli_args.data_path
+                    + f"DS{self.cli_args.data_ver}/"
+                    + "train/ns/"
+                )
+            elif self.cli_args.input_type == "PL":
                 if self.cli_args.DEBUG:
-                    log.info(f'Training input type: PL')
-                train_sets = CTSet(self.cli_args.data_path +
-                                   f'DS{self.cli_args.data_ver}/' + 'train/pl/')
+                    log.info(f"Training input type: PL")
+                train_sets = CTSet(
+                    self.cli_args.data_path
+                    + f"DS{self.cli_args.data_ver}/"
+                    + "train/pl/"
+                )
             else:
-                log.info('Enter either FDK or PL as input_type!')
+                log.info("Enter either FDK or PL as input_type!")
 
             train_truth_sets = CTSet(
-                self.cli_args.data_path + f'DS{self.cli_args.data_ver}/' + 'train/full/')
+                self.cli_args.data_path + f"DS{self.cli_args.data_ver}/" + "train/full/"
+            )
 
             train_images = train_sets[0]
             train_truth_images = train_truth_sets[0]
-            for idx in range(train_sets.__len__()-1):
-                train_images = torch.cat((train_images, train_sets[idx+1]), 0)
+            for idx in range(train_sets.__len__() - 1):
+                train_images = torch.cat((train_images, train_sets[idx + 1]), 0)
                 train_truth_images = torch.cat(
-                    (train_truth_images, train_truth_sets[idx+1]), 0)
+                    (train_truth_images, train_truth_sets[idx + 1]), 0
+                )
 
         else:
-            log.info('Loading Training Data Sets From Saved Tensor...')
-            if self.cli_args.input_type == 'FDK':
+            log.info("Loading Training Data Sets From Saved Tensor...")
+            if self.cli_args.input_type == "FDK":
                 if self.cli_args.DEBUG:
-                    log.info('Training input type: FDK')
+                    log.info("Training input type: FDK")
                 if self.cli_args.augment:
                     # train_images = torch.load(
                     #     self.cli_args.data_path + f'DS{self.cli_args.data_ver}/' + 'train/ns/train_ns_aug.pt')
                     train_images_dir = (
-                        self.cli_args.data_path + f'DS{self.cli_args.data_ver}/' + 'train/ns/train_ns_aug.npy')
+                        self.cli_args.data_path
+                        + f"DS{self.cli_args.data_ver}/"
+                        + "train/ns/train_ns_aug.npy"
+                    )
                 else:
                     # train_images = torch.load(
                     #     self.cli_args.data_path + f'DS{self.cli_args.data_ver}/' + 'train/ns/train_ns.pt')
                     train_images_dir = (
-                        self.cli_args.data_path + f'DS{self.cli_args.data_ver}/' + 'train/ns/train_ns.npy')
+                        self.cli_args.data_path
+                        + f"DS{self.cli_args.data_ver}/"
+                        + "train/ns/train_ns.npy"
+                    )
 
-            elif self.cli_args.input_type == 'PL':
+            elif self.cli_args.input_type == "PL":
                 if self.cli_args.DEBUG:
-                    log.info('Training input type: PL')
+                    log.info("Training input type: PL")
                 if self.cli_args.augment:
                     # train_images = torch.load(
                     #     self.cli_args.data_path + f'DS{self.cli_args.data_ver}/' + f'train/pl/train_pl_b{self.cli_args.pl_ver}_aug.pt')
                     train_images_dir = (
-                        self.cli_args.data_path + f'DS{self.cli_args.data_ver}/' + f'train/pl/train_pl_b{self.cli_args.pl_ver}_aug.npy')
+                        self.cli_args.data_path
+                        + f"DS{self.cli_args.data_ver}/"
+                        + f"train/pl/train_pl_b{self.cli_args.pl_ver}_aug.npy"
+                    )
                 else:
                     # train_images = torch.load(
                     #     self.cli_args.data_path + f'DS{self.cli_args.data_ver}/' + f'train/pl/train_pl_b{self.cli_args.pl_ver}.pt')
                     train_images_dir = (
-                        self.cli_args.data_path + f'DS{self.cli_args.data_ver}/' + f'train/pl/train_pl_b{self.cli_args.pl_ver}.npy')
+                        self.cli_args.data_path
+                        + f"DS{self.cli_args.data_ver}/"
+                        + f"train/pl/train_pl_b{self.cli_args.pl_ver}.npy"
+                    )
             else:
-                log.info('Enter either FDK or PL as input_type!')
+                log.info("Enter either FDK or PL as input_type!")
 
             if self.cli_args.augment:
                 # train_truth_images = torch.load(
                 #     self.cli_args.data_path + f'DS{self.cli_args.data_ver}/' + 'train/full/train_full_aug.pt')
                 train_truth_images_dir = (
-                    self.cli_args.data_path + f'DS{self.cli_args.data_ver}/' + 'train/full/train_full_aug.npy')
+                    self.cli_args.data_path
+                    + f"DS{self.cli_args.data_ver}/"
+                    + "train/full/train_full_aug.npy"
+                )
             else:
                 # train_truth_images = torch.load(
                 #     self.cli_args.data_path + f'DS{self.cli_args.data_ver}/' + 'train/full/train_full.pt')
                 train_truth_images_dir = (
-                    self.cli_args.data_path + f'DS{self.cli_args.data_ver}/' + 'train/full/train_full.npy')
+                    self.cli_args.data_path
+                    + f"DS{self.cli_args.data_ver}/"
+                    + "train/full/train_full.npy"
+                )
 
         train_set = PairNumpySet(train_images_dir, train_truth_images_dir)
 
@@ -296,9 +294,13 @@ class TrainingApp:
         n_workers = self.cli_args.num_workers
         bool_shuffle = self.cli_args.shuffle
 
-        train_dl = torch.utils.data.DataLoader(train_set, batch_size=n_batches,
-                                               num_workers=n_workers, pin_memory=bool_shuffle,
-                                               shuffle=bool_shuffle)
+        train_dl = torch.utils.data.DataLoader(
+            train_set,
+            batch_size=n_batches,
+            num_workers=n_workers,
+            pin_memory=bool_shuffle,
+            shuffle=bool_shuffle,
+        )
 
         # if self.cli_args.DEBUG:
         #     log.info(f'Training Sample Shape: {train_images.shape}')
@@ -307,60 +309,88 @@ class TrainingApp:
 
     def initValDl(self):
         if self.cli_args.reload_data:
-            log.info('Reloading Validation Data Sets...')
-            if self.cli_args.input_type == 'FDK':
+            log.info("Reloading Validation Data Sets...")
+            if self.cli_args.input_type == "FDK":
                 if self.cli_args.DEBUG:
-                    log.info('Validation input type: FDK')
-                val_sets = CTSet(self.cli_args.data_path +
-                                 f'DS{self.cli_args.data_ver}/' + 'validation/ns/')
-            elif self.cli_args.input_type == 'PL':
+                    log.info("Validation input type: FDK")
+                val_sets = CTSet(
+                    self.cli_args.data_path
+                    + f"DS{self.cli_args.data_ver}/"
+                    + "validation/ns/"
+                )
+            elif self.cli_args.input_type == "PL":
                 if self.cli_args.DEBUG:
-                    log.info('Validation input type: PL')
-                val_sets = CTSet(self.cli_args.data_path +
-                                 f'DS{self.cli_args.data_ver}/' + 'validation/pl/')
+                    log.info("Validation input type: PL")
+                val_sets = CTSet(
+                    self.cli_args.data_path
+                    + f"DS{self.cli_args.data_ver}/"
+                    + "validation/pl/"
+                )
             else:
-                log.info('Enter either FDK or PL as input_type!')
+                log.info("Enter either FDK or PL as input_type!")
 
-            val_truth_sets = CTSet(self.cli_args.data_path +
-                                   f'DS{self.cli_args.data_ver}/' + 'validation/full/')
+            val_truth_sets = CTSet(
+                self.cli_args.data_path
+                + f"DS{self.cli_args.data_ver}/"
+                + "validation/full/"
+            )
 
             val_images = val_sets[0]
             val_truth_images = val_truth_sets[0]
-            for idx in range(val_sets.__len__()-1):
-                val_images = torch.cat((val_images, val_sets[idx+1]), 0)
+            for idx in range(val_sets.__len__() - 1):
+                val_images = torch.cat((val_images, val_sets[idx + 1]), 0)
                 val_truth_images = torch.cat(
-                    (val_truth_images, val_truth_sets[idx+1]), 0)
+                    (val_truth_images, val_truth_sets[idx + 1]), 0
+                )
         else:
-            log.info('Loading Validation Data Sets From Saved Tensor...')
-            if self.cli_args.input_type == 'FDK':
+            log.info("Loading Validation Data Sets From Saved Tensor...")
+            if self.cli_args.input_type == "FDK":
                 if self.cli_args.DEBUG:
-                    log.info('Validation input type: FDK')
+                    log.info("Validation input type: FDK")
                 if self.cli_args.augment:
                     val_images = torch.load(
-                        self.cli_args.data_path + f'DS{self.cli_args.data_ver}/' + 'validation/ns/val_ns_aug.pt')
+                        self.cli_args.data_path
+                        + f"DS{self.cli_args.data_ver}/"
+                        + "validation/ns/val_ns_aug.pt"
+                    )
                 else:
                     val_images = torch.load(
-                        self.cli_args.data_path + f'DS{self.cli_args.data_ver}/' + 'validation/ns/val_ns.pt')
-            elif self.cli_args.input_type == 'PL':
+                        self.cli_args.data_path
+                        + f"DS{self.cli_args.data_ver}/"
+                        + "validation/ns/val_ns.pt"
+                    )
+            elif self.cli_args.input_type == "PL":
                 if self.cli_args.DEBUG:
-                    log.info('Validation input type: PL')
+                    log.info("Validation input type: PL")
                 if self.cli_args.augment:
                     val_images = torch.load(
-                        self.cli_args.data_path + f'DS{self.cli_args.data_ver}/' + f'validation/pl/val_pl_b{self.cli_args.pl_ver}_aug.pt')
+                        self.cli_args.data_path
+                        + f"DS{self.cli_args.data_ver}/"
+                        + f"validation/pl/val_pl_b{self.cli_args.pl_ver}_aug.pt"
+                    )
                 else:
                     val_images = torch.load(
-                        self.cli_args.data_path + f'DS{self.cli_args.data_ver}/' + 'validation/ns/val_ns.pt')
+                        self.cli_args.data_path
+                        + f"DS{self.cli_args.data_ver}/"
+                        + "validation/ns/val_ns.pt"
+                    )
             else:
-                log.info('Enter either FDK or PL as input_type!')
+                log.info("Enter either FDK or PL as input_type!")
             if self.cli_args.augment:
                 val_truth_images = torch.load(
-                    self.cli_args.data_path + f'DS{self.cli_args.data_ver}/' + 'validation/full/val_full_aug.pt')
+                    self.cli_args.data_path
+                    + f"DS{self.cli_args.data_ver}/"
+                    + "validation/full/val_full_aug.pt"
+                )
             else:
                 val_truth_images = torch.load(
-                    self.cli_args.data_path + f'DS{self.cli_args.data_ver}/' + 'validation/full/val_full.pt')
+                    self.cli_args.data_path
+                    + f"DS{self.cli_args.data_ver}/"
+                    + "validation/full/val_full.pt"
+                )
 
         if self.cli_args.DEBUG:
-            log.info(f'Validation Sample Shape: {val_images.shape}')
+            log.info(f"Validation Sample Shape: {val_images.shape}")
 
         val_set = PairSet(val_images, val_truth_images)
 
@@ -368,24 +398,29 @@ class TrainingApp:
         n_workers = self.cli_args.num_workers
         bool_shuffle = self.cli_args.shuffle
 
-        val_dl = torch.utils.data.DataLoader(val_set, batch_size=n_batches,
-                                             num_workers=n_workers, pin_memory=bool_shuffle,
-                                             shuffle=bool_shuffle)
+        val_dl = torch.utils.data.DataLoader(
+            val_set,
+            batch_size=n_batches,
+            num_workers=n_workers,
+            pin_memory=bool_shuffle,
+            shuffle=bool_shuffle,
+        )
 
         return val_dl
 
     def initTensorboardWriters(self):
         if self.trn_writer is None:
-            log_dir = os.path.join(
-                'runs', self.cli_args.model_name, self.time_str)
+            log_dir = os.path.join("runs", self.cli_args.model_name, self.time_str)
 
             self.trn_writer = SummaryWriter(
-                log_dir=log_dir + '-trn_cls-' + self.cli_args.comment)
+                log_dir=log_dir + "-trn_cls-" + self.cli_args.comment
+            )
             self.val_writer = SummaryWriter(
-                log_dir=log_dir + '-val_cls-' + self.cli_args.comment)
+                log_dir=log_dir + "-val_cls-" + self.cli_args.comment
+            )
 
     def main(self):
-        log.info('Starting {}, {}'.format(type(self).__name__, self.cli_args))
+        log.info("Starting {}, {}".format(type(self).__name__, self.cli_args))
 
         train_dl = self.initTrainDl()
         val_dl = self.initValDl()
@@ -396,41 +431,42 @@ class TrainingApp:
         # trainning settings
         n_epoch = self.cli_args.epoch
         batch_size = self.cli_args.batch_size
-        log.info('Training setting:')
-        log.info(f'Training name: {self.cli_args.model_name}')
-        log.info(f'Number of epoch: {n_epoch}')
-        log.info(f'Batch Size: {batch_size}')
-        log.info(f'Input type: {self.cli_args.input_type}')
-        log.info(f'Dataset Version: DS{self.cli_args.data_ver}')
-        log.info(f'Data Shuffle: {self.cli_args.shuffle}')
-        log.info(f'Data Augmentation: {self.cli_args.augment}')
-        log.info(f'Optimizer: {self.cli_args.optimizer}')
-        log.info(f'Momentum: {self.cli_args.momentum}')
-        log.info(f'Gradient Clip: {self.cli_args.grad_clip}')
+        log.info("Training setting:")
+        log.info(f"Training name: {self.cli_args.model_name}")
+        log.info(f"Number of epoch: {n_epoch}")
+        log.info(f"Batch Size: {batch_size}")
+        log.info(f"Input type: {self.cli_args.input_type}")
+        log.info(f"Dataset Version: DS{self.cli_args.data_ver}")
+        log.info(f"Data Shuffle: {self.cli_args.shuffle}")
+        log.info(f"Data Augmentation: {self.cli_args.augment}")
+        log.info(f"Optimizer: {self.cli_args.optimizer}")
+        log.info(f"Momentum: {self.cli_args.momentum}")
+        log.info(f"Gradient Clip: {self.cli_args.grad_clip}")
         if self.cli_args.grad_clip:
-            log.info(f'Clip Max: {self.cli_args.grad_max}')
-        log.info(f'Tensor Board: {self.cli_args.tensor_board}')
+            log.info(f"Clip Max: {self.cli_args.grad_max}")
+        log.info(f"Tensor Board: {self.cli_args.tensor_board}")
 
         avg_train_loss_values = []
         avg_val_loss_values = []
 
-        log.info('Start training...')
+        log.info("Start training...")
         dur = []
         training_start_time = time.time()
 
         lr_range = self.cli_args.learning_rate
 
-        for epoch_ndx in range(1, n_epoch+1):
+        for epoch_ndx in range(1, n_epoch + 1):
 
             ###################
             # train the model #
             ###################
             self.model.train()
 
-            learning_rate = lr_range[min(
-                epoch_ndx-1, len(self.cli_args.learning_rate)-1)]
+            learning_rate = lr_range[
+                min(epoch_ndx - 1, len(self.cli_args.learning_rate) - 1)
+            ]
             if self.cli_args.DEBUG:
-                log.info(f'Epoch: {epoch_ndx}, Learning Rate: {learning_rate}')
+                log.info(f"Epoch: {epoch_ndx}, Learning Rate: {learning_rate}")
             self.optimizer = self.initOptimizer(learning_rate)
 
             # monitor training loss
@@ -459,11 +495,12 @@ class TrainingApp:
                 train_loss.backward()
                 # clip gradient
                 torch.nn.utils.clip_grad_value_(
-                    self.model.parameters(), clip_value=self.cli_args.grad_max)
+                    self.model.parameters(), clip_value=self.cli_args.grad_max
+                )
                 # perform a single optimization step (parameter update)
                 self.optimizer.step()
                 # update running training loss
-                running_train_loss += train_loss.item()*train_batch.size(0)
+                running_train_loss += train_loss.item() * train_batch.size(0)
 
                 # log.info(f'output: + {outputs.get_device()}')
                 # log.info(f'truth:  + {train_truth_batch.get_device()}')
@@ -482,13 +519,12 @@ class TrainingApp:
                 #         log.info(f'Training SSIM: {running_train_ssim}')
 
             # print avg training statistics
-            avg_train_loss = running_train_loss/len(train_dl)
+            avg_train_loss = running_train_loss / len(train_dl)
             avg_train_loss_values.append(avg_train_loss)
 
             # store loss (SmoothL1) and SSIM in TensorBoard
             if self.cli_args.tensor_board:
-                self.trn_writer.add_scalar(
-                    "Loss", avg_train_loss, epoch_ndx)
+                self.trn_writer.add_scalar("Loss", avg_train_loss, epoch_ndx)
                 # avg_train_psnr = running_train_psnr/len(train_dl)
                 # self.trn_writer.add_scalar("PSNR", avg_train_psnr, epoch_ndx)
                 # avg_train_ssim = running_train_ssim/len(train_dl)
@@ -497,12 +533,14 @@ class TrainingApp:
             # dur.append(time.time() - t_train)
             dur = time.time() - t_train
 
-            log.info('Epoch: {} \tTraining Loss: {:.6f}  \tTime(s) {:.4f}'.format(
-                epoch_ndx,
-                avg_train_loss,
-                # np.mean(dur)
-                dur
-            ))
+            log.info(
+                "Epoch: {} \tTraining Loss: {:.6f}  \tTime(s) {:.4f}".format(
+                    epoch_ndx,
+                    avg_train_loss,
+                    # np.mean(dur)
+                    dur,
+                )
+            )
 
             ###################
             # validation the model #
@@ -533,7 +571,7 @@ class TrainingApp:
                     # calculate the loss
                     val_loss = self.criterion(val_outputs, val_truth_batch)
                     # update running validation loss
-                    running_val_loss += val_loss.item()*val_batch.size(0)
+                    running_val_loss += val_loss.item() * val_batch.size(0)
 
                     # if self.cli_args.tensor_board:
                     #     # psnr
@@ -550,13 +588,12 @@ class TrainingApp:
                     #         log.info(f'Validation SSIM: {running_val_ssim}')
 
                 # print avg validation statistics
-                avg_val_loss = running_val_loss/len(val_dl)
+                avg_val_loss = running_val_loss / len(val_dl)
                 avg_val_loss_values.append(avg_val_loss)
 
                 # store loss (SmoothL1) and SSIM in TensorBoard
                 if self.cli_args.tensor_board:
-                    self.val_writer.add_scalar(
-                        "Loss", avg_val_loss, epoch_ndx)
+                    self.val_writer.add_scalar("Loss", avg_val_loss, epoch_ndx)
                     # avg_val_psnr = running_val_psnr/len(val_dl)
                     # self.val_writer.add_scalar("PSNR", avg_val_psnr, epoch_ndx)
                     # avg_val_ssim = running_val_ssim/len(val_dl)
@@ -565,34 +602,58 @@ class TrainingApp:
                 # dur.append(time.time() - t_val)
                 dur = time.time() - t_val
 
-                log.info('Epoch: {} \tValidation Loss: {:.6f}  \tTime(s) {:.4f}'.format(
-                    epoch_ndx,
-                    avg_val_loss,
-                    # np.mean(dur)
-                    dur
-                ))
+                log.info(
+                    "Epoch: {} \tValidation Loss: {:.6f}  \tTime(s) {:.4f}".format(
+                        epoch_ndx,
+                        avg_val_loss,
+                        # np.mean(dur)
+                        dur,
+                    )
+                )
 
             # save check_point
-            if (epoch_ndx+1) % self.cli_args.checkpoint_save_step == 0 or (epoch_ndx+1) == self.cli_args.epoch:
+            if (epoch_ndx + 1) % self.cli_args.checkpoint_save_step == 0 or (
+                epoch_ndx + 1
+            ) == self.cli_args.epoch:
                 if not os.path.exists(self.cli_args.checkpoint_dir):
                     os.mkdir(self.cli_args.checkpoint_dir)
                 check_point_path = os.path.join(
-                    self.cli_args.checkpoint_dir, 'epoch-%d.pkl' % (epoch_ndx+1))
-                torch.save({'epoch': epoch_ndx+1, 'state_dict': self.model.state_dict(), 'optimizer': self.optimizer.state_dict()},
-                           check_point_path)
-                print('save checkpoint %s', check_point_path)
+                    self.cli_args.checkpoint_dir, "epoch-%d.pkl" % (epoch_ndx + 1)
+                )
+                torch.save(
+                    {
+                        "epoch": epoch_ndx + 1,
+                        "state_dict": self.model.state_dict(),
+                        "optimizer": self.optimizer.state_dict(),
+                    },
+                    check_point_path,
+                )
+                print("save checkpoint %s", check_point_path)
 
-        log.info('Training finished, took {:.2f}s'.format(
-            time.time() - training_start_time))
+        log.info(
+            "Training finished, took {:.2f}s".format(time.time() - training_start_time)
+        )
 
-        log.info('Saving training results...')
-        torch.save(self.model.state_dict(),
-                   self.cli_args.model_dir + self.cli_args.model_name + '.pth')
-        log.info(f'Model saved as: {self.cli_args.model_name}')
-        torch.save(avg_train_loss_values, self.cli_args.model_dir +
-                   'loss/' + self.cli_args.model_name + '_train_loss.pth')
-        torch.save(avg_val_loss_values, self.cli_args.model_dir +
-                   'loss/' + self.cli_args.model_name + '_validation_loss.pth')
+        log.info("Saving training results...")
+        torch.save(
+            self.model.state_dict(),
+            self.cli_args.model_dir + self.cli_args.model_name + ".pth",
+        )
+        log.info(f"Model saved as: {self.cli_args.model_name}")
+        torch.save(
+            avg_train_loss_values,
+            self.cli_args.model_dir
+            + "loss/"
+            + self.cli_args.model_name
+            + "_train_loss.pth",
+        )
+        torch.save(
+            avg_val_loss_values,
+            self.cli_args.model_dir
+            + "loss/"
+            + self.cli_args.model_name
+            + "_validation_loss.pth",
+        )
 
         if self.cli_args.tensor_board:
             self.trn_writer.flush()
@@ -616,5 +677,5 @@ class TrainingApp:
             torch.cuda.empty_cache()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     TrainingApp().main()

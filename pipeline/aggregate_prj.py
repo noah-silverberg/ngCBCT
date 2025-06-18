@@ -2,7 +2,7 @@ import torch
 import os
 from .config import DATA_DIR
 from .utils import ensure_dir
-from dsets import PrjSet
+from .dsets import PrjSet
 
 
 def aggregate_saved_projections(scan_type: str, sample: str):

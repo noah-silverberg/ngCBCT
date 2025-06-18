@@ -1,10 +1,9 @@
 import logging
+import importlib
 
 
 def run_app(app: str, args: list):
     """Run a training or other application via dynamic import and its main()."""
-    import importlib
-
     # Prepend default args
     argv = []
     argv.append(f"--num_workers=0")
@@ -13,7 +12,7 @@ def run_app(app: str, args: list):
     log = logging.getLogger("pipeline")
     log.info(f"RUNNING: {app} {argv}\n")
     module_name, class_name = app.rsplit(".", 1)
-    module = importlib.import_module(module_name)
+    module = importlib.import_module("pipeline." + module_name)
     cls = getattr(module, class_name)
     instance = cls(argv)
     instance.main()

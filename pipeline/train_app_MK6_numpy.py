@@ -18,16 +18,14 @@ from torch.utils.data import DataLoader
 from .dsets import PairSet, PairNumpySet, CTSet
 from . import network_instance
 import logging
-from torchmetrics.image import PeakSignalNoiseRatio
-from torchmetrics.image import StructuralSimilarityIndexMeasure
 from dataclasses import dataclass
 from tqdm import tqdm
+from typing import Union
 from .utils import ensure_dir
 from .config import (
     AGG_DIR,
     MODEL_DIR,
     DEBUG,
-    data_version,
     PD_epochs,
     PD_learning_rate,
     PD_network_name,
@@ -84,7 +82,7 @@ log.debug("Using CUDA; {} devices.".format(torch.cuda.device_count()))
 @dataclass
 class TrainingArgs:
     epoch: int
-    learning_rate: float
+    learning_rate: Union[float, list]
     network: str
     model_name: str
     batch_size: int
@@ -101,7 +99,6 @@ class TrainingArgs:
     tensor_board: bool
     comment: str
     augment: bool
-    data_ver: int
     scan_type: str
     domain: str
     train_during_inference: bool
@@ -138,7 +135,6 @@ class TrainingArgs:
             f"tensor_board: {self.tensor_board}",
             f"comment: {self.comment}",
             f"augment: {self.augment}",
-            f"data_ver: {self.data_ver}",
             f"scan_type: {self.scan_type}",
             f"domain: {self.domain}",
             f"train_during_inference: {self.train_during_inference}",
@@ -152,11 +148,7 @@ def get_training_args(domain, scan_type):
         # Create dataclass instance
         args = TrainingArgs(
             epoch=PD_epochs,
-            learning_rate=(
-                [PD_learning_rate] * PD_epochs
-                if isinstance(PD_learning_rate, float)
-                else PD_learning_rate
-            ),
+            learning_rate=PD_learning_rate,
             network=PD_network_name,
             model_name=PD_model_name,
             batch_size=PD_batch_size,
@@ -173,7 +165,6 @@ def get_training_args(domain, scan_type):
             tensor_board=PD_tensor_board,
             comment=PD_tensor_board_comment,
             augment=False,  # PD does not use augmentation
-            data_ver=data_version,
             scan_type=scan_type,
             domain=domain,
             train_during_inference=PD_train_during_inference,
@@ -181,11 +172,7 @@ def get_training_args(domain, scan_type):
     elif domain == "IMAG":
         args = TrainingArgs(
             epoch=ID_epochs,
-            learning_rate=(
-                [ID_learning_rate] * ID_epochs
-                if isinstance(ID_learning_rate, float)
-                else ID_learning_rate
-            ),
+            learning_rate=ID_learning_rate,
             network=ID_network_name,
             model_name=ID_model_name,
             batch_size=ID_batch_size,
@@ -202,7 +189,6 @@ def get_training_args(domain, scan_type):
             tensor_board=ID_tensor_board,
             comment=ID_tensor_board_comment,
             augment=ID_augment,
-            data_ver=data_version,
             scan_type=scan_type,
             domain=domain,
             train_during_inference=ID_train_during_inference,
@@ -273,7 +259,11 @@ def init_tensorboard_writers(args: TrainingArgs, time_str):
     return trn_writer, val_writer
 
 
-def get_data_sub_path(args: TrainingArgs, sample):
+def get_data_sub_path(
+    args: TrainingArgs,
+    sample,
+    truth,
+):
     """Get the sub-path for the data based on the data type."""
     augment = args.augment
     domain = args.domain
@@ -281,12 +271,12 @@ def get_data_sub_path(args: TrainingArgs, sample):
 
     # We need to know the input type and augmentation setting to get the right data
     if augment:
-        sub_path = f"{domain}_ng_{scan_type}_{sample}_aug.npy"
+        sub_path = f"{domain}_{'gated' if truth else 'ng'}_{scan_type}_{sample}_aug.npy"
     else:
-        sub_path = f"{domain}_ng_{scan_type}_{sample}.npy"
+        sub_path = f"{domain}_{'gated' if truth else 'ng'}_{scan_type}_{sample}.npy"
 
     log.debug(
-        f"Data type: {domain.capitalize()} domain {sample.capitalize()} data for {scan_type} {'with' if augment else 'without'} augmentation"
+        f"Data type: {domain} domain {sample} data for {scan_type} {'with' if augment else 'without'} augmentation"
     )
 
     return sub_path
@@ -294,14 +284,14 @@ def get_data_sub_path(args: TrainingArgs, sample):
 
 def init_dataloader(args: TrainingArgs, sample):
     """Initialize the DataLoader for a specific sample ('TRAIN', 'VALIDATION', or 'TEST')."""
-    # Get the sub-path to the training data within the aggregation directory
-    sub_path = get_data_sub_path(args, sample)
-
-    images_path = os.path.join(AGG_DIR, sub_path)
+    # Get the path to the training data within the aggregation directory
+    images_sub_path = get_data_sub_path(args, sample, False)
+    images_path = os.path.join(AGG_DIR, images_sub_path)
     log.debug(f"{sample} images path: {images_path}")
 
-    # Replace "ng" with "gated" to get the ground truth path
-    truth_images_path = images_path.replace("ng", "gated")
+    # Get the path to the ground truth data
+    truth_images_sub_path = get_data_sub_path(args, sample, True)
+    truth_images_path = os.path.join(AGG_DIR, truth_images_sub_path)
     log.debug(f"{sample} ground truth images path: {truth_images_path}")
 
     # Load the dataset
@@ -319,7 +309,7 @@ def init_dataloader(args: TrainingArgs, sample):
         dataset,
         batch_size=n_batches,
         num_workers=n_workers,
-        pin_memory=bool_shuffle,
+        pin_memory=bool_shuffle,  # TODO why is this the same as shuffle?
         shuffle=bool_shuffle,
     )
     log.debug(
@@ -345,8 +335,8 @@ class TrainingApp:
         self.time_str = datetime.datetime.now().strftime("%Y-%m-%d_%H.%M.%S")
 
         # Initialize model, loss, and optimizer
-        self.model = init_model(self.domain, self.scan_type)
-        self.criterion = init_loss(self.domain, self.scan_type)
+        self.model = init_model(self.args)
+        self.criterion = init_loss(self.args)
 
     def main(self):
         log.debug("Starting {}, {}".format(type(self).__name__, self.args))
@@ -380,6 +370,7 @@ class TrainingApp:
 
         # Train for the chosen number of epochs
         log.info("STARTING TRAINING...")
+        # NOTE: epoch_ndx is 1-indexed!!
         for epoch_ndx in range(1, self.args.epoch + 1):
             # Set the model to training mode
             self.model.train()
@@ -409,8 +400,8 @@ class TrainingApp:
             for train_set in tqdm(train_dl, desc=f"Epoch {epoch_ndx} Training"):
 
                 # Extract the input and ground truth, and send to GPU
-                train_inputs = train_set[0].to(self.device)
-                train_truths = train_set[1].to(self.device)
+                train_inputs = train_set[0].to(device)
+                train_truths = train_set[1].to(device)
 
                 # Zero out the gradients, do a forward pass, compute the loss, and backpropagate
                 self.optimizer.zero_grad()
@@ -431,7 +422,7 @@ class TrainingApp:
                 epoch_total_train_loss += train_loss.item() * train_inputs.size(0)
 
             # Save avg training statistics
-            epoch_avg_train_loss = epoch_total_train_loss / len(train_dl)
+            epoch_avg_train_loss = epoch_total_train_loss / len(train_dl.dataset)
             avg_train_loss_values.append(epoch_avg_train_loss)
 
             # Store loss in TensorBoard if enabled
@@ -450,7 +441,9 @@ class TrainingApp:
             if self.args.train_during_inference:
                 # If training during inference, set the model to training mode
                 # for MC dropout, for example
-                log.debug("Model set to training mode for validation.")
+                log.warning(
+                    "Model set to training mode for validation -- please ensure this is intended!"
+                )
                 self.model.train()
             else:
                 # Put the model in eval mode
@@ -470,8 +463,8 @@ class TrainingApp:
                 for val_set in tqdm(val_dl, desc=f"Epoch {epoch_ndx} Validation"):
 
                     # Extract the input and ground truth, and send to GPU
-                    val_inputs = val_set[0].to(self.device)
-                    val_truths = val_set[1].to(self.device)
+                    val_inputs = val_set[0].to(device)
+                    val_truths = val_set[1].to(device)
 
                     # Do a forward pass and calculate the loss
                     val_outputs = self.model(val_inputs)
@@ -481,7 +474,7 @@ class TrainingApp:
                     epoch_total_val_loss += val_loss.item() * val_inputs.size(0)
 
                 # Save avg validation statistics
-                epoch_avg_val_loss = epoch_total_val_loss / len(val_dl)
+                epoch_avg_val_loss = epoch_total_val_loss / len(val_dl.dataset)
                 avg_val_loss_values.append(epoch_avg_val_loss)
 
                 # Store loss in TensorBoard if enabled
@@ -497,22 +490,21 @@ class TrainingApp:
                 )
 
             # Save model if needed (either at checkpoint or at end of training)
-            if (epoch_ndx + 1) % self.args.checkpoint_save_step == 0 or (
-                epoch_ndx + 1
-            ) == self.args.epoch:
-                save_path = os.path.join(
-                    save_directory, "epoch-%d.pkl" % (epoch_ndx + 1)
-                )
+            if (
+                epoch_ndx % self.args.checkpoint_save_step == 0
+                or epoch_ndx == self.args.epoch
+            ):
+                save_path = os.path.join(save_directory, "epoch-%d.pkl" % epoch_ndx)
                 torch.save(
                     {
-                        "epoch": epoch_ndx + 1,
+                        "epoch": epoch_ndx,
                         "state_dict": self.model.state_dict(),
                         "optimizer": self.optimizer.state_dict(),
                     },
                     save_path,
                 )
                 log.info(
-                    "Checkpoint saved at epoch {}: {}".format(epoch_ndx + 1, save_path)
+                    "Checkpoint saved at epoch {}: {}".format(epoch_ndx, save_path)
                 )
 
         log.info(
@@ -551,20 +543,27 @@ class TrainingApp:
         # Clean up memory
         log.debug("Cleaning up memory...")
         gc.collect()
-        del self.model
-        del self.trn_writer, self.val_writer
-        del self.args
-        del self.optimizer
-        del self.criterion
-        del train_inputs, train_truths
-        del val_inputs, val_truths
-        del train_dl, val_dl
-        del train_outputs, val_outputs
-        del train_loss, val_loss
-        del epoch_total_train_loss, epoch_total_val_loss
-        del epoch_avg_train_loss, epoch_avg_val_loss
-        del avg_train_loss_values, avg_val_loss_values
-        del self.time_str
+
+        # We don't want to have the whole pipeline break if we fail to clean up memory
+        # So we catch any exceptions that might occur during cleanup
+        try:
+            del self.model
+            del self.trn_writer, self.val_writer
+            del self.args
+            del self.optimizer
+            del self.criterion
+            del train_inputs, train_truths
+            del val_inputs, val_truths
+            del train_dl, val_dl
+            del train_outputs, val_outputs
+            del train_loss, val_loss
+            del epoch_total_train_loss, epoch_total_val_loss
+            del epoch_avg_train_loss, epoch_avg_val_loss
+            del avg_train_loss_values, avg_val_loss_values
+            del self.time_str
+        except Exception as e:
+            log.error(f"Error during memory cleanup: {e}")
+
         with torch.no_grad():
             torch.cuda.empty_cache()
 

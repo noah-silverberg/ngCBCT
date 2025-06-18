@@ -12,7 +12,7 @@ def load_projection_mat(patient: str, scan: str, scan_type: str):
     Args:
         patient (str): Patient identifier (e.g., '13'), scalar string.
         scan (str): Scan identifier (e.g., '01'), scalar string.
-        scan_type (str): Type of scan (e.g., 'nonstop'), scalar string.
+        scan_type (str): Type of scan (e.g., 'HF'), scalar string.
 
     Returns:
         odd_index (np.ndarray): shape (K,), 1-based indices of nonstop-gated angles.
@@ -20,7 +20,7 @@ def load_projection_mat(patient: str, scan: str, scan_type: str):
         prj (torch.Tensor): shape (W, H, A), gated projection data.
     """
     # Load projection mat file for a given scan
-    mat_path = f"{WORK_ROOT}/data/panc_prj/{scan_type}/mat/panc{patient}.{scan_type}{scan}.mat"  # TODO change path as needed
+    mat_path = f"{WORK_ROOT}/raw_data/p{patient}.{scan_type}{scan}.{scan_type}.mat"  # TODO change path as needed
     mat = mat73.loadmat(mat_path)
 
     odd_index = np.array(mat["odd_index"])  # angle indices to keep for nonstop gated
@@ -99,7 +99,7 @@ def interpolate_projections(prj_gcbct: torch.Tensor, odd_index: np.ndarray):
     tmp = prj_ngcbct.detach().clone().permute(1, 0, 2)  # [H, angles, W]
 
     # Get the indices of the unacquired angles in nonstop-gated
-    miss_idx = find_missing_indices(odd_index)
+    miss_idx = find_missing_indices(ngcbct_idx)
 
     # Now we find the start and end indices of gaps in the acquired angles
     # we do this by sorting the acquired indices and then seeing where

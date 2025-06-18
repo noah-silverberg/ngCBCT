@@ -20,6 +20,7 @@ from . import network_instance
 import logging
 from torchmetrics.image import PeakSignalNoiseRatio
 from torchmetrics.image import StructuralSimilarityIndexMeasure
+from .config import AGG_DIR
 
 # Set up logging
 log = logging.getLogger(__name__)
@@ -79,10 +80,22 @@ def parse_sys_argv(sys_argv=None):
         "--data_path", default="D:/MitchellYu/NSG_CBCT/phase4/data/", type=str
     )
 
+    parser.add_argument(
+        "--domain",
+        help="Domain of the data, either 'PROJ' or 'IMAG'",
+        default="IMAG",
+        type=str,
+    )
+    parser.add_argument(
+        "--scan_type",
+        help="Type of scan, either 'HF' or 'FF'",
+        default="HF",
+        type=str,
+    )
+
     parser.add_argument("--input_type", default="FDK", type=str)
     parser.add_argument("--pl_ver", default=1, type=int)
 
-    parser.add_argument("--reload_data", default=False, type=bool)
     parser.add_argument("--augment", default=False, type=bool)
     parser.add_argument(
         "--learning_rate_Adam",
@@ -164,7 +177,9 @@ def init_model(cli_args):
 
 
 def init_loss(cli_args):
-    return nn.SmoothL1Loss()
+    loss = nn.SmoothL1Loss()
+    log.info("Loss function: SmoothL1Loss")
+    return loss
 
 
 def init_optimizer(cli_args, model):
@@ -207,6 +222,72 @@ def init_tensorboard_writers(cli_args, time_str):
     return trn_writer, val_writer
 
 
+def get_data_sub_path(cli_args, sample):
+    """Get the sub-path for the data based on the data type."""
+    input_type = cli_args.input_type
+    augment = cli_args.augment
+    domain = cli_args.domain
+    scan_type = cli_args.scan_type
+    pl_ver = cli_args.pl_ver
+
+    # We need to know the input type and augmentation setting to get the right data
+    if (input_type, augment) == ("FDK", True):
+        sub_path = f"{domain}_ng_{scan_type}_{sample}_aug.npy"
+    elif (input_type, augment) == ("FDK", False):
+        sub_path = f"{domain}_ng_{scan_type}_{sample}.npy"
+    elif (input_type, augment) == ("PL", True):
+        sub_path = f"{domain}_ng_{scan_type}_{sample}_pl{pl_ver}_aug.npy"
+    elif (input_type, augment) == ("PL", False):
+        sub_path = f"{domain}_ng_{scan_type}_{sample}_pl{pl_ver}.npy"
+    else:
+        raise ValueError(
+            "Invalid input_type or augment. Please enter either 'FDK' or 'PL' for input_type and True or False for augment."
+        )
+
+    log.info(
+        f"Data type: {domain.capitalize()} domain {sample.capitalize()} data for {scan_type} {input_type} {'with' if augment else 'without'} augmentation"
+    )
+
+    return sub_path
+
+
+def init_train_dataloader(training_app):
+    """Initialize the training DataLoader."""
+    # Get the sub-path to the training data within the aggregation directory
+    sub_path = get_data_sub_path(training_app.cli_args, "TRAIN")
+
+    train_images_path = os.path.join(AGG_DIR, sub_path)
+    log.info(f"Training images path: {train_images_path}")
+
+    # Replace "ng" with "gated" to get the ground truth path
+    train_truth_images_path = train_images_path.replace("ng", "gated")
+    log.info(f"Training ground truth images path: {train_truth_images_path}")
+
+    # Load the training dataset
+    train_set = PairNumpySet(train_images_path, train_truth_images_path)
+    log.info(
+        f"Training dataset loaded with {len(train_set)} samples, each with shape {train_set[0][0].shape}."
+    )
+
+    n_batches = training_app.cli_args.batch_size
+    n_workers = training_app.cli_args.num_workers
+    bool_shuffle = training_app.cli_args.shuffle
+
+    # Create the train dataloader
+    train_dl = torch.utils.data.DataLoader(
+        train_set,
+        batch_size=n_batches,
+        num_workers=n_workers,
+        pin_memory=bool_shuffle,
+        shuffle=bool_shuffle,
+    )
+    log.info(
+        f"Training dataload initialized with {len(train_dl)} batches of size {n_batches}, with {n_workers} workers, shuffle={bool_shuffle}, and pin_memory={bool_shuffle}."
+    )
+
+    return train_dl
+
+
 class TrainingApp:
     def __init__(self, sys_argv=None):
         # Parse command line arguments
@@ -225,121 +306,6 @@ class TrainingApp:
         self.model = init_model(self.cli_args)
         self.criterion = init_loss(self.cli_args)
         self.optimizer = init_optimizer(self.cli_args, self.model)
-
-    def initTrainDl(self):
-        if self.cli_args.reload_data:
-            log.info("Reloading Training Data Sets...")
-            log.info("Augmentation Not Supported...")
-            if self.cli_args.input_type == "FDK":
-                if self.cli_args.DEBUG:
-                    log.info(f"Training input type: FDK")
-                train_sets = CTSet(
-                    self.cli_args.data_path
-                    + f"DS{self.cli_args.data_ver}/"
-                    + "train/ns/"
-                )
-            elif self.cli_args.input_type == "PL":
-                if self.cli_args.DEBUG:
-                    log.info(f"Training input type: PL")
-                train_sets = CTSet(
-                    self.cli_args.data_path
-                    + f"DS{self.cli_args.data_ver}/"
-                    + "train/pl/"
-                )
-            else:
-                log.info("Enter either FDK or PL as input_type!")
-
-            train_truth_sets = CTSet(
-                self.cli_args.data_path + f"DS{self.cli_args.data_ver}/" + "train/full/"
-            )
-
-            train_images = train_sets[0]
-            train_truth_images = train_truth_sets[0]
-            for idx in range(train_sets.__len__() - 1):
-                train_images = torch.cat((train_images, train_sets[idx + 1]), 0)
-                train_truth_images = torch.cat(
-                    (train_truth_images, train_truth_sets[idx + 1]), 0
-                )
-
-        else:
-            log.info("Loading Training Data Sets From Saved Tensor...")
-            if self.cli_args.input_type == "FDK":
-                if self.cli_args.DEBUG:
-                    log.info("Training input type: FDK")
-                if self.cli_args.augment:
-                    # train_images = torch.load(
-                    #     self.cli_args.data_path + f'DS{self.cli_args.data_ver}/' + 'train/ns/train_ns_aug.pt')
-                    train_images_dir = (
-                        self.cli_args.data_path
-                        + f"DS{self.cli_args.data_ver}/"
-                        + "train/ns/train_ns_aug.npy"
-                    )
-                else:
-                    # train_images = torch.load(
-                    #     self.cli_args.data_path + f'DS{self.cli_args.data_ver}/' + 'train/ns/train_ns.pt')
-                    train_images_dir = (
-                        self.cli_args.data_path
-                        + f"DS{self.cli_args.data_ver}/"
-                        + "train/ns/train_ns.npy"
-                    )
-
-            elif self.cli_args.input_type == "PL":
-                if self.cli_args.DEBUG:
-                    log.info("Training input type: PL")
-                if self.cli_args.augment:
-                    # train_images = torch.load(
-                    #     self.cli_args.data_path + f'DS{self.cli_args.data_ver}/' + f'train/pl/train_pl_b{self.cli_args.pl_ver}_aug.pt')
-                    train_images_dir = (
-                        self.cli_args.data_path
-                        + f"DS{self.cli_args.data_ver}/"
-                        + f"train/pl/train_pl_b{self.cli_args.pl_ver}_aug.npy"
-                    )
-                else:
-                    # train_images = torch.load(
-                    #     self.cli_args.data_path + f'DS{self.cli_args.data_ver}/' + f'train/pl/train_pl_b{self.cli_args.pl_ver}.pt')
-                    train_images_dir = (
-                        self.cli_args.data_path
-                        + f"DS{self.cli_args.data_ver}/"
-                        + f"train/pl/train_pl_b{self.cli_args.pl_ver}.npy"
-                    )
-            else:
-                log.info("Enter either FDK or PL as input_type!")
-
-            if self.cli_args.augment:
-                # train_truth_images = torch.load(
-                #     self.cli_args.data_path + f'DS{self.cli_args.data_ver}/' + 'train/full/train_full_aug.pt')
-                train_truth_images_dir = (
-                    self.cli_args.data_path
-                    + f"DS{self.cli_args.data_ver}/"
-                    + "train/full/train_full_aug.npy"
-                )
-            else:
-                # train_truth_images = torch.load(
-                #     self.cli_args.data_path + f'DS{self.cli_args.data_ver}/' + 'train/full/train_full.pt')
-                train_truth_images_dir = (
-                    self.cli_args.data_path
-                    + f"DS{self.cli_args.data_ver}/"
-                    + "train/full/train_full.npy"
-                )
-
-        train_set = PairNumpySet(train_images_dir, train_truth_images_dir)
-
-        n_batches = self.cli_args.batch_size
-        n_workers = self.cli_args.num_workers
-        bool_shuffle = self.cli_args.shuffle
-
-        train_dl = torch.utils.data.DataLoader(
-            train_set,
-            batch_size=n_batches,
-            num_workers=n_workers,
-            pin_memory=bool_shuffle,
-            shuffle=bool_shuffle,
-        )
-
-        # if self.cli_args.DEBUG:
-        #     log.info(f'Training Sample Shape: {train_images.shape}')
-
-        return train_dl
 
     def initValDl(self):
         if self.cli_args.reload_data:
@@ -445,8 +411,10 @@ class TrainingApp:
     def main(self):
         log.info("Starting {}, {}".format(type(self).__name__, self.cli_args))
 
-        train_dl = self.initTrainDl()
+        train_dl = init_train_dataloader(self)
+        log.info(f"Initialized training dataloader with {len(train_dl)} batches.")
         val_dl = self.initValDl()
+        log.info(f"Initialized validation dataloader with {len(val_dl)} batches.")
 
         if self.cli_args.tensor_board:
             self.trn_writer, self.val_writer = init_tensorboard_writers(

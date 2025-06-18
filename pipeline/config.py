@@ -49,6 +49,9 @@ RESULT_DIR = os.path.join(PHASE_DATAVER_DIR, "result")  # for outputs of CNN
 PROJ_DIR = os.path.join(
     PHASE_DATAVER_DIR, "proj_data"
 )  # for input data (gated and non-stop gated projections)
+AGG_DIR = os.path.join(
+    PHASE_DATAVER_DIR, "agg"
+)  # for aggregated data (for PD and ID training)
 
 # # Default plotting clip ranges
 # CLIP_LOW = 0

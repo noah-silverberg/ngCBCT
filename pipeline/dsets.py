@@ -269,6 +269,8 @@ class PairNumpySet(Dataset):
         # Load only metadata (not full tensors)
         self.tensor_1 = np.load(tensor_path_1, mmap_mode="r")
         self.tensor_2 = np.load(tensor_path_2, mmap_mode="r")
+        if self.tensor_1.shape != self.tensor_2.shape:
+            raise ValueError("Tensors must have the same shape.")
         self.length = self.tensor_1.shape[0]  # Number of samples
 
     def __len__(self):

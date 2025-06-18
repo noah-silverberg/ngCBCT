@@ -10,3 +10,5 @@ Data/
 *.bbl
 *.blg
 __pycache__/
+*.pt
+*.mat

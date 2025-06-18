@@ -20,7 +20,53 @@ from . import network_instance
 import logging
 from torchmetrics.image import PeakSignalNoiseRatio
 from torchmetrics.image import StructuralSimilarityIndexMeasure
-from .config import AGG_DIR
+from dataclasses import dataclass
+from tqdm import tqdm
+from .utils import ensure_dir
+from .config import (
+    AGG_DIR,
+    MODEL_DIR,
+    DEBUG,
+    data_version,
+    PD_epochs,
+    PD_learning_rate,
+    PD_network_name,
+    PD_model_name,
+    PD_batch_size,
+    PD_optimizer,
+    PD_num_workers,
+    PD_shuffle,
+    PD_grad_clip,
+    PD_grad_max,
+    PD_betas_NAdam,
+    PD_momentum_decay_NAdam,
+    PD_momentum_SGD,
+    PD_weight_decay_SGD,
+    PD_checkpoint_save_freq,
+    PD_tensor_board,
+    PD_tensor_board_comment,
+    PD_train_during_inference,
+    ID_epochs,
+    ID_learning_rate,
+    ID_network_name,
+    ID_model_name,
+    ID_batch_size,
+    ID_optimizer,
+    ID_num_workers,
+    ID_shuffle,
+    ID_grad_clip,
+    ID_grad_max,
+    ID_betas_NAdam,
+    ID_momentum_decay_NAdam,
+    ID_momentum_SGD,
+    ID_weight_decay_SGD,
+    ID_augment,
+    ID_checkpoint_save_freq,
+    ID_tensor_board,
+    ID_tensor_board_comment,
+    ID_train_during_inference,
+)
+
 
 # Set up logging
 log = logging.getLogger(__name__)
@@ -31,247 +77,242 @@ if not use_cuda:
         "CUDA is not available. Please check your PyTorch installation or GPU setup."
     )
 device = torch.device("cuda:0" if use_cuda else "cpu")
-log.info("Using CUDA; {} devices.".format(torch.cuda.device_count()))
+log.debug("Using CUDA; {} devices.".format(torch.cuda.device_count()))
 
 
-def parse_sys_argv(sys_argv=None):
-    """Parse command line arguments for the training application."""
-    if sys_argv is None:
-        sys_argv = sys.argv[1:]
+# TODO add PL back
+@dataclass
+class TrainingArgs:
+    epoch: int
+    learning_rate: float
+    network: str
+    model_name: str
+    batch_size: int
+    optimizer: str
+    num_workers: int
+    shuffle: bool
+    grad_clip: bool
+    grad_max: float
+    betas_NAdam: tuple
+    momentum_decay_NAdam: float
+    momentum_SGD: float
+    weight_decay_SGD: float
+    checkpoint_save_step: int
+    tensor_board: bool
+    comment: str
+    augment: bool
+    data_ver: int
+    scan_type: str
+    domain: str
+    train_during_inference: bool
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--epoch",
-        help="Number of epochs to train for",
-        default=1,
-        type=int,
-    )
-    parser.add_argument(
-        "--network",
-        help="Network for training",
-        default="FBPCONVNet",
-        type=str,
-    )
-    parser.add_argument("--model_name", type=str, default="test")
-    parser.add_argument(
-        "--data_ver",
-        help="Dataset version",
-        type=str,
-    )
-    parser.add_argument("--optimizer", default="SGD", type=str)
-    parser.add_argument("--shuffle", default=True, type=bool)
-    parser.add_argument("--DEBUG", default=False, type=bool)
-    parser.add_argument(
-        "--batch_size",
-        help="Batch size to use for training",
-        default=8,
-        type=int,
-    )
-    parser.add_argument(
-        "--num_workers",
-        help="Number of worker processes for background data loading",
-        default=0,
-        type=int,
-    )
+    def __str__(self):  # nice printing of the training args
+        lines = [
+            f"epoch: {self.epoch}",
+            f"learning_rate: {self.learning_rate}",
+            f"network: {self.network}",
+            f"model_name: {self.model_name}",
+            f"batch_size: {self.batch_size}",
+            f"optimizer: {self.optimizer}",
+            f"num_workers: {self.num_workers}",
+            f"shuffle: {self.shuffle}",
+            f"grad_clip: {self.grad_clip}",
+        ]
 
-    # --------------------------
+        # include optimizer-specific args
+        if self.grad_clip:
+            lines.append(f"grad_max: {self.grad_max}")
+        if self.optimizer == "NAdam":
+            lines += [
+                f"betas_NAdam: {self.betas_NAdam}",
+                f"momentum_decay_NAdam: {self.momentum_decay_NAdam}",
+            ]
+        elif self.optimizer == "SGD":
+            lines += [
+                f"momentum_SGD: {self.momentum_SGD}",
+                f"weight_decay_SGD: {self.weight_decay_SGD}",
+            ]
 
-    parser.add_argument(
-        "--data_path", default="D:/MitchellYu/NSG_CBCT/phase4/data/", type=str
-    )
+        lines += [
+            f"checkpoint_save_step: {self.checkpoint_save_step}",
+            f"tensor_board: {self.tensor_board}",
+            f"comment: {self.comment}",
+            f"augment: {self.augment}",
+            f"data_ver: {self.data_ver}",
+            f"scan_type: {self.scan_type}",
+            f"domain: {self.domain}",
+            f"train_during_inference: {self.train_during_inference}",
+        ]
 
-    parser.add_argument(
-        "--domain",
-        help="Domain of the data, either 'PROJ' or 'IMAG'",
-        default="IMAG",
-        type=str,
-    )
-    parser.add_argument(
-        "--scan_type",
-        help="Type of scan, either 'HF' or 'FF'",
-        default="HF",
-        type=str,
-    )
-
-    parser.add_argument("--input_type", default="FDK", type=str)
-    parser.add_argument("--pl_ver", default=1, type=int)
-
-    parser.add_argument("--augment", default=False, type=bool)
-    parser.add_argument(
-        "--learning_rate_Adam",
-        help="Learning rate for Adam",
-        default=1e-3,
-        type=float,
-    )
-    parser.add_argument(
-        "--learning_rate_NAdam",
-        help="Learning rate for NAdam",
-        default=1e-3,
-        type=float,
-    )
-    parser.add_argument(
-        "--betas_NAdam",
-        help="Betas for NAdam",
-        default=(0.9, 0.999),
-        type=tuple,
-    )
-    parser.add_argument(
-        "--momentum_decay_NAdam",
-        help="Momentum decay for NAdam",
-        default=4e-4,
-        type=float,
-    )
-    parser.add_argument("--grad_clip", default=True, type=bool)
-    parser.add_argument(
-        "--grad_max",
-        help="",
-        default=0.01,
-        type=float,
-    )
-
-    # SGD optimizer parameters
-    parser.add_argument(
-        "--learning_rate_SGD",
-        help="Learning rate for SGD",
-        default=np.logspace(-2, -3, 20),
-        type=tuple,
-    )
-    parser.add_argument(
-        "--momentum_SGD",
-        help="",
-        default=0.99,
-        type=float,
-    )
-    parser.add_argument(
-        "--weight_decay_SGD",
-        help="",
-        default=1e-8,
-        type=float,
-    )
-
-    parser.add_argument("--model_dir", type=str, default="./model/")
-
-    parser.add_argument("--checkpoint_save_step", help="", default=10, type=int)
-    parser.add_argument("--checkpoint_dir", type=str, default="./checkpoints/")
-
-    parser.add_argument("--tensor_board", default=False, type=bool)
-
-    parser.add_argument(
-        "comment",
-        help="Comment suffix for Tensorboard run.",
-        nargs="?",
-        default="dwlpt",
-    )
-
-    return parser.parse_args(sys_argv)
+        return "\n".join(lines)
 
 
-def init_model(cli_args):
+def get_training_args(domain, scan_type):
+    if domain == "PROJ":
+        # Create dataclass instance
+        args = TrainingArgs(
+            epoch=PD_epochs,
+            learning_rate=(
+                [PD_learning_rate] * PD_epochs
+                if isinstance(PD_learning_rate, float)
+                else PD_learning_rate
+            ),
+            network=PD_network_name,
+            model_name=PD_model_name,
+            batch_size=PD_batch_size,
+            optimizer=PD_optimizer,
+            num_workers=PD_num_workers,
+            shuffle=PD_shuffle,
+            grad_clip=PD_grad_clip,
+            grad_max=PD_grad_max,
+            betas_NAdam=PD_betas_NAdam,
+            momentum_decay_NAdam=PD_momentum_decay_NAdam,
+            momentum_SGD=PD_momentum_SGD,
+            weight_decay_SGD=PD_weight_decay_SGD,
+            checkpoint_save_step=PD_checkpoint_save_freq,
+            tensor_board=PD_tensor_board,
+            comment=PD_tensor_board_comment,
+            augment=False,  # PD does not use augmentation
+            data_ver=data_version,
+            scan_type=scan_type,
+            domain=domain,
+            train_during_inference=PD_train_during_inference,
+        )
+    elif domain == "IMAG":
+        args = TrainingArgs(
+            epoch=ID_epochs,
+            learning_rate=(
+                [ID_learning_rate] * ID_epochs
+                if isinstance(ID_learning_rate, float)
+                else ID_learning_rate
+            ),
+            network=ID_network_name,
+            model_name=ID_model_name,
+            batch_size=ID_batch_size,
+            optimizer=ID_optimizer,
+            num_workers=ID_num_workers,
+            shuffle=ID_shuffle,
+            grad_clip=ID_grad_clip,
+            grad_max=ID_grad_max,
+            betas_NAdam=ID_betas_NAdam,
+            momentum_decay_NAdam=ID_momentum_decay_NAdam,
+            momentum_SGD=ID_momentum_SGD,
+            weight_decay_SGD=ID_weight_decay_SGD,
+            checkpoint_save_step=ID_checkpoint_save_freq,
+            tensor_board=ID_tensor_board,
+            comment=ID_tensor_board_comment,
+            augment=ID_augment,
+            data_ver=data_version,
+            scan_type=scan_type,
+            domain=domain,
+            train_during_inference=ID_train_during_inference,
+        )
+    else:
+        raise ValueError(
+            f"Domain {domain} is not supported. Supported domains are: PROJ, IMAG."
+        )
+
+    return args
+
+
+def init_model(args: TrainingArgs):
     """Initialize the CNN model and move it to the GPU."""
-    model = getattr(network_instance, cli_args.network)()
-    log.info(f"Network Selected: {cli_args.network}")
+    model = getattr(network_instance, args.network)()
+    log.debug(f"Network Selected: {args.network}")
 
     model = model.to(device)
 
     return model
 
 
-def init_loss(cli_args):
+def init_loss(args: TrainingArgs):
     loss = nn.SmoothL1Loss()
-    log.info("Loss function: SmoothL1Loss")
+    log.debug("Loss function: SmoothL1Loss")
     return loss
 
 
-def init_optimizer(cli_args, model):
-    if cli_args.optimizer == "SGD":
-        log.info(
-            f"Optimizer: SGD with learning rate {cli_args.learning_rate_SGD}, momentum {cli_args.momentum_SGD}, weight decay {cli_args.weight_decay_SGD}"
+def init_optimizer(learning_rate, args: TrainingArgs, model):
+    if args.optimizer == "SGD":
+        log.debug(
+            f"Optimizer: SGD with learning rate {learning_rate}, momentum {args.momentum_SGD}, weight decay {args.weight_decay_SGD}"
         )
         return SGD(
             model.parameters(),
-            lr=cli_args.learning_rate_SGD,
-            momentum=cli_args.momentum_SGD,
-            weight_decay=cli_args.weight_decay_SGD,
+            lr=learning_rate,
+            momentum=args.momentum_SGD,
+            weight_decay=args.weight_decay_SGD,
         )
-    elif cli_args.optimizer == "Adam":
-        log.info(f"Optimizer: Adam with learning rate {cli_args.learning_rate_Adam}")
-        return Adam(model.parameters(), lr=cli_args.learning_rate_Adam)
-    elif cli_args.optimizer == "NAdam":
-        log.info(
-            f"Optimizer: NAdam with learning rate {cli_args.learning_rate_NAdam}, betas {cli_args.betas_NAdam}, momentum_decay {cli_args.momentum_decay_NAdam}"
+    elif args.optimizer == "Adam":
+        log.debug(f"Optimizer: Adam with learning rate {learning_rate}")
+        return Adam(model.parameters(), lr=learning_rate)
+    elif args.optimizer == "NAdam":
+        log.debug(
+            f"Optimizer: NAdam with learning rate {learning_rate}, betas {args.betas_NAdam}, momentum_decay {args.momentum_decay_NAdam}"
         )
         return NAdam(
             model.parameters(),
-            lr=cli_args.learning_rate_NAdam,
-            betas=cli_args.betas_NAdam,
-            momentum_decay=cli_args.momentum_decay_NAdam,
+            lr=learning_rate,
+            betas=args.betas_NAdam,
+            momentum_decay=args.momentum_decay_NAdam,
         )
 
     raise NotImplementedError(
-        f"Optimizer {cli_args.optimizer} is not implemented. Supported optimizers are: SGD, Adam, NAdam."
+        f"Optimizer {args.optimizer} is not implemented. Supported optimizers are: SGD, Adam, NAdam."
     )
 
 
-def init_tensorboard_writers(cli_args, time_str):
+def init_tensorboard_writers(args: TrainingArgs, time_str):
     """Initialize TensorBoard writers for training and validation."""
-    log_dir = os.path.join("runs", cli_args.model_name, time_str)
+    log_dir = os.path.join("runs", args.model_name, time_str)
 
-    trn_writer = SummaryWriter(log_dir=log_dir + "-trn_cls-" + cli_args.comment)
-    val_writer = SummaryWriter(log_dir=log_dir + "-val_cls-" + cli_args.comment)
+    trn_writer = SummaryWriter(log_dir=log_dir + "-trn_cls-" + args.comment)
+    val_writer = SummaryWriter(log_dir=log_dir + "-val_cls-" + args.comment)
+
+    log.debug(f"TensorBoard writers initialized at {log_dir}")
 
     return trn_writer, val_writer
 
 
-def get_data_sub_path(cli_args, sample):
+def get_data_sub_path(args: TrainingArgs, sample):
     """Get the sub-path for the data based on the data type."""
-    input_type = cli_args.input_type
-    augment = cli_args.augment
-    domain = cli_args.domain
-    scan_type = cli_args.scan_type
-    pl_ver = cli_args.pl_ver
+    augment = args.augment
+    domain = args.domain
+    scan_type = args.scan_type
 
     # We need to know the input type and augmentation setting to get the right data
-    if (input_type, augment) == ("FDK", True):
+    if augment:
         sub_path = f"{domain}_ng_{scan_type}_{sample}_aug.npy"
-    elif (input_type, augment) == ("FDK", False):
-        sub_path = f"{domain}_ng_{scan_type}_{sample}.npy"
-    elif (input_type, augment) == ("PL", True):
-        sub_path = f"{domain}_ng_{scan_type}_{sample}_pl{pl_ver}_aug.npy"
-    elif (input_type, augment) == ("PL", False):
-        sub_path = f"{domain}_ng_{scan_type}_{sample}_pl{pl_ver}.npy"
     else:
-        raise ValueError(
-            "Invalid input_type or augment. Please enter either 'FDK' or 'PL' for input_type and True or False for augment."
-        )
+        sub_path = f"{domain}_ng_{scan_type}_{sample}.npy"
 
-    log.info(
-        f"Data type: {domain.capitalize()} domain {sample.capitalize()} data for {scan_type} {input_type} {'with' if augment else 'without'} augmentation"
+    log.debug(
+        f"Data type: {domain.capitalize()} domain {sample.capitalize()} data for {scan_type} {'with' if augment else 'without'} augmentation"
     )
 
     return sub_path
 
 
-def init_dataloader(cli_args, sample):
+def init_dataloader(args: TrainingArgs, sample):
     """Initialize the DataLoader for a specific sample ('TRAIN', 'VALIDATION', or 'TEST')."""
     # Get the sub-path to the training data within the aggregation directory
-    sub_path = get_data_sub_path(cli_args, sample)
+    sub_path = get_data_sub_path(args, sample)
 
     images_path = os.path.join(AGG_DIR, sub_path)
-    log.info(f"{sample} images path: {images_path}")
+    log.debug(f"{sample} images path: {images_path}")
 
     # Replace "ng" with "gated" to get the ground truth path
     truth_images_path = images_path.replace("ng", "gated")
-    log.info(f"{sample} ground truth images path: {truth_images_path}")
+    log.debug(f"{sample} ground truth images path: {truth_images_path}")
 
     # Load the dataset
     dataset = PairNumpySet(images_path, truth_images_path)
-    log.info(
+    log.debug(
         f"{sample} dataset loaded with {len(dataset)} samples, each with shape {dataset[0][0].shape}."
     )
 
-    n_batches = cli_args.batch_size
-    n_workers = cli_args.num_workers
-    bool_shuffle = cli_args.shuffle
+    n_batches = args.batch_size
+    n_workers = args.num_workers
+    bool_shuffle = args.shuffle
 
     # Create the dataloader
     dataloader = torch.utils.data.DataLoader(
@@ -281,7 +322,7 @@ def init_dataloader(cli_args, sample):
         pin_memory=bool_shuffle,
         shuffle=bool_shuffle,
     )
-    log.info(
+    log.debug(
         f"{sample} dataloader initialized with {len(dataloader)} batches of size {n_batches}, with {n_workers} workers, shuffle={bool_shuffle}, and pin_memory={bool_shuffle}."
     )
 
@@ -289,228 +330,178 @@ def init_dataloader(cli_args, sample):
 
 
 class TrainingApp:
-    def __init__(self, sys_argv=None):
-        # Parse command line arguments
-        self.cli_args = parse_sys_argv(sys_argv)
+    def __init__(self, domain, scan_type):
+        self.args = get_training_args(
+            domain, scan_type
+        )  # TODO implement this as a yaml file?
 
         # Set logging level
-        if self.cli_args.DEBUG:
-            log.setLevel(logging.INFO)
+        if DEBUG:
+            log.setLevel(logging.DEBUG)
         else:
-            log.setLevel(logging.WARNING)
+            log.setLevel(logging.INFO)
 
         # Current time string for tensorboard
         self.time_str = datetime.datetime.now().strftime("%Y-%m-%d_%H.%M.%S")
 
         # Initialize model, loss, and optimizer
-        self.model = init_model(self.cli_args)
-        self.criterion = init_loss(self.cli_args)
-        self.optimizer = init_optimizer(self.cli_args, self.model)
+        self.model = init_model(self.domain, self.scan_type)
+        self.criterion = init_loss(self.domain, self.scan_type)
 
     def main(self):
-        log.info("Starting {}, {}".format(type(self).__name__, self.cli_args))
+        log.debug("Starting {}, {}".format(type(self).__name__, self.args))
 
-        train_dl = init_dataloader(self.cli_args, "TRAIN")
-        log.info(f"Initialized training dataloader with {len(train_dl)} batches.")
-        val_dl = init_dataloader(self.cli_args, "VALIDATION")
-        log.info(f"Initialized validation dataloader with {len(val_dl)} batches.")
+        # Get the dataloaders for training and validation
+        train_dl = init_dataloader(self.args, "TRAIN")
+        log.debug(f"Initialized training dataloader with {len(train_dl)} batches.")
+        val_dl = init_dataloader(self.args, "VALIDATION")
+        log.debug(f"Initialized validation dataloader with {len(val_dl)} batches.")
 
-        if self.cli_args.tensor_board:
+        # Initialize the tensorboard writers if enabled
+        if self.args.tensor_board:
             self.trn_writer, self.val_writer = init_tensorboard_writers(
-                self.cli_args, self.time_str
+                self.args, self.time_str
             )
 
-        # trainning settings
-        n_epoch = self.cli_args.epoch
-        batch_size = self.cli_args.batch_size
-        log.info("Training setting:")
-        log.info(f"Training name: {self.cli_args.model_name}")
-        log.info(f"Number of epoch: {n_epoch}")
-        log.info(f"Batch Size: {batch_size}")
-        log.info(f"Input type: {self.cli_args.input_type}")
-        log.info(f"Dataset Version: DS{self.cli_args.data_ver}")
-        log.info(f"Data Shuffle: {self.cli_args.shuffle}")
-        log.info(f"Data Augmentation: {self.cli_args.augment}")
-        log.info(f"Optimizer: {self.cli_args.optimizer}")
-        log.info(f"Momentum: {self.cli_args.momentum}")
-        log.info(f"Gradient Clip: {self.cli_args.grad_clip}")
-        if self.cli_args.grad_clip:
-            log.info(f"Clip Max: {self.cli_args.grad_max}")
-        log.info(f"Tensor Board: {self.cli_args.tensor_board}")
+        # Make sure we have a valid directory for saving the model/checkpoints
+        save_directory = os.path.join(MODEL_DIR, self.args.model_name)
+        ensure_dir(save_directory)
 
+        # Summarize training settings
+        log.info("TRAINING SETTINGS:")
+        log.info(self.args)
+
+        # Save start time of training
+        training_start_time = time.time()
+
+        # Keep track of the average training and validation loss for each epoch
         avg_train_loss_values = []
         avg_val_loss_values = []
 
-        log.info("Start training...")
-        dur = []
-        training_start_time = time.time()
-
-        lr_range = self.cli_args.learning_rate
-
-        for epoch_ndx in range(1, n_epoch + 1):
-
-            ###################
-            # train the model #
-            ###################
+        # Train for the chosen number of epochs
+        log.info("STARTING TRAINING...")
+        for epoch_ndx in range(1, self.args.epoch + 1):
+            # Set the model to training mode
             self.model.train()
+            log.debug("Model set to training mode for training.")
 
-            learning_rate = lr_range[
-                min(epoch_ndx - 1, len(self.cli_args.learning_rate) - 1)
-            ]
-            if self.cli_args.DEBUG:
-                log.info(f"Epoch: {epoch_ndx}, Learning Rate: {learning_rate}")
-            self.optimizer = self.initOptimizer(learning_rate)
+            if isinstance(self.args.learning_rate, float):
+                # If learning rate is a float, use it directly
+                learning_rate = self.args.learning_rate
+            else:
+                # Otherwise, use the learning rate schedule
+                learning_rate = self.args.learning_rate[
+                    min(epoch_ndx - 1, len(self.args.learning_rate) - 1)
+                ]
 
-            # monitor training loss
-            running_train_loss = 0.0
-            running_train_psnr = 0.0
-            running_train_ssim = 0.0
+            log.debug(f"Epoch: {epoch_ndx}, Learning Rate: {learning_rate}")
 
-            # time training time for each epoch
-            t_train = time.time()
+            # Initialize the optimizer with the current learning rate
+            self.optimizer = init_optimizer(learning_rate, self.args, self.model)
 
-            for train_set in train_dl:
+            # Monitor training loss
+            epoch_total_train_loss = 0.0
 
-                train_batch = train_set[0]
-                train_truth_batch = train_set[1]
+            # Start time of the training phase
+            epoch_train_start_time = time.time()
 
-                train_batch = train_batch.to(self.device)
-                train_truth_batch = train_truth_batch.to(self.device)
+            # Loop throught the batches in the training dataloader
+            for train_set in tqdm(train_dl, desc=f"Epoch {epoch_ndx} Training"):
 
-                # clear the gradients of all optimized variables
+                # Extract the input and ground truth, and send to GPU
+                train_inputs = train_set[0].to(self.device)
+                train_truths = train_set[1].to(self.device)
+
+                # Zero out the gradients, do a forward pass, compute the loss, and backpropagate
                 self.optimizer.zero_grad()
-                # forward pass: compute predicted outputs by passing inputs to the model
-                train_outputs = self.model(train_batch)
-                # calculate the loss
-                train_loss = self.criterion(train_outputs, train_truth_batch)
-                # backward pass: compute gradient of the loss with respect to model parameters
+                train_outputs = self.model(train_inputs)
+                train_loss = self.criterion(train_outputs, train_truths)
                 train_loss.backward()
-                # clip gradient
-                torch.nn.utils.clip_grad_value_(
-                    self.model.parameters(), clip_value=self.cli_args.grad_max
-                )
-                # perform a single optimization step (parameter update)
+
+                # Clip gradients if needed
+                if self.args.grad_clip:
+                    torch.nn.utils.clip_grad_value_(
+                        self.model.parameters(), clip_value=self.args.grad_max
+                    )
+
+                # Parameter update
                 self.optimizer.step()
-                # update running training loss
-                running_train_loss += train_loss.item() * train_batch.size(0)
 
-                # log.info(f'output: + {outputs.get_device()}')
-                # log.info(f'truth:  + {train_truth_batch.get_device()}')
-                # if self.cli_args.tensor_board:
-                #     # psnr
-                #     train_psnr_batch = psnr(
-                #         train_outputs.detach().clone().cpu(), train_truth_batch.detach().clone().cpu())
-                #     running_train_psnr += train_psnr_batch.item()
-                #     # ssim
-                #     train_ssim_batch = ssim(
-                #         train_outputs.detach().clone().cpu(), train_truth_batch.detach().clone().cpu())
-                #     running_train_ssim += train_ssim_batch.item()
-                #     if self.cli_args.DEBUG:
-                #         log.info(f'Training Loss: {running_train_loss}')
-                #         log.info(f'Training PSNR: {running_train_psnr}')
-                #         log.info(f'Training SSIM: {running_train_ssim}')
+                # Update epoch training loss
+                epoch_total_train_loss += train_loss.item() * train_inputs.size(0)
 
-            # print avg training statistics
-            avg_train_loss = running_train_loss / len(train_dl)
-            avg_train_loss_values.append(avg_train_loss)
+            # Save avg training statistics
+            epoch_avg_train_loss = epoch_total_train_loss / len(train_dl)
+            avg_train_loss_values.append(epoch_avg_train_loss)
 
-            # store loss (SmoothL1) and SSIM in TensorBoard
-            if self.cli_args.tensor_board:
-                self.trn_writer.add_scalar("Loss", avg_train_loss, epoch_ndx)
-                # avg_train_psnr = running_train_psnr/len(train_dl)
-                # self.trn_writer.add_scalar("PSNR", avg_train_psnr, epoch_ndx)
-                # avg_train_ssim = running_train_ssim/len(train_dl)
-                # self.trn_writer.add_scalar("SSIM", avg_train_ssim, epoch_ndx)
-
-            # dur.append(time.time() - t_train)
-            dur = time.time() - t_train
+            # Store loss in TensorBoard if enabled
+            if self.args.tensor_board:
+                self.trn_writer.add_scalar("Loss", epoch_avg_train_loss, epoch_ndx)
 
             log.info(
-                "Epoch: {} \tTraining Loss: {:.6f}  \tTime(s) {:.4f}".format(
+                "Epoch: {} \tAvg Training Loss: {:.6f}  \tTime(s) {:.4f}".format(
                     epoch_ndx,
-                    avg_train_loss,
-                    # np.mean(dur)
-                    dur,
+                    epoch_avg_train_loss,
+                    time.time() - epoch_train_start_time,
                 )
             )
 
-            ###################
-            # validation the model #
-            ###################
+            # Validation phase
+            if self.args.train_during_inference:
+                # If training during inference, set the model to training mode
+                # for MC dropout, for example
+                log.debug("Model set to training mode for validation.")
+                self.model.train()
+            else:
+                # Put the model in eval mode
+                log.debug("Model set to evaluation mode for validation.")
+                self.model.eval()
 
-            self.model.eval()
-
+            # We don't need to compute gradients during validation
             with torch.no_grad():
 
-                # monitor validation loss
-                running_val_loss = 0.0
-                running_val_psnr = 0.0
-                running_val_ssim = 0.0
+                # Monitor validation loss
+                epoch_total_val_loss = 0.0
 
-                # time validation time for each epoch
-                t_val = time.time()
+                # Start time of the validation phase
+                epoch_val_start_time = time.time()
 
-                for val_set in val_dl:
+                # Loop through the batches in the validation dataloader
+                for val_set in tqdm(val_dl, desc=f"Epoch {epoch_ndx} Validation"):
 
-                    val_batch = val_set[0]
-                    val_truth_batch = val_set[1]
+                    # Extract the input and ground truth, and send to GPU
+                    val_inputs = val_set[0].to(self.device)
+                    val_truths = val_set[1].to(self.device)
 
-                    val_batch = val_batch.to(self.device)
-                    val_truth_batch = val_truth_batch.to(self.device)
+                    # Do a forward pass and calculate the loss
+                    val_outputs = self.model(val_inputs)
+                    val_loss = self.criterion(val_outputs, val_truths)
 
-                    # forward pass: compute predicted outputs by passing inputs to the model
-                    val_outputs = self.model(val_batch)
-                    # calculate the loss
-                    val_loss = self.criterion(val_outputs, val_truth_batch)
-                    # update running validation loss
-                    running_val_loss += val_loss.item() * val_batch.size(0)
+                    # Update epoch validation loss
+                    epoch_total_val_loss += val_loss.item() * val_inputs.size(0)
 
-                    # if self.cli_args.tensor_board:
-                    #     # psnr
-                    #     val_psnr_batch = psnr(
-                    #         val_outputs.detach().clone().cpu(), val_truth_batch.detach().clone().cpu())
-                    #     running_val_psnr += val_psnr_batch.item()
-                    #     # ssim
-                    #     val_ssim_batch = ssim(
-                    #         val_outputs.detach().clone().cpu(), val_truth_batch.detach().clone().cpu())
-                    #     running_val_ssim += val_ssim_batch.item()  # *val_batch.size(0)
-                    #     if self.cli_args.DEBUG:
-                    #         log.info(f'Validation Loss: {running_val_loss}')
-                    #         log.info(f'Validation PSNR: {running_val_psnr}')
-                    #         log.info(f'Validation SSIM: {running_val_ssim}')
+                # Save avg validation statistics
+                epoch_avg_val_loss = epoch_total_val_loss / len(val_dl)
+                avg_val_loss_values.append(epoch_avg_val_loss)
 
-                # print avg validation statistics
-                avg_val_loss = running_val_loss / len(val_dl)
-                avg_val_loss_values.append(avg_val_loss)
-
-                # store loss (SmoothL1) and SSIM in TensorBoard
-                if self.cli_args.tensor_board:
-                    self.val_writer.add_scalar("Loss", avg_val_loss, epoch_ndx)
-                    # avg_val_psnr = running_val_psnr/len(val_dl)
-                    # self.val_writer.add_scalar("PSNR", avg_val_psnr, epoch_ndx)
-                    # avg_val_ssim = running_val_ssim/len(val_dl)
-                    # self.val_writer.add_scalar("SSIM", avg_val_ssim, epoch_ndx)
-
-                # dur.append(time.time() - t_val)
-                dur = time.time() - t_val
+                # Store loss in TensorBoard if enabled
+                if self.args.tensor_board:
+                    self.val_writer.add_scalar("Loss", epoch_avg_val_loss, epoch_ndx)
 
                 log.info(
-                    "Epoch: {} \tValidation Loss: {:.6f}  \tTime(s) {:.4f}".format(
+                    "Epoch: {} \tAvg Validation Loss: {:.6f}  \tTime(s) {:.4f}".format(
                         epoch_ndx,
-                        avg_val_loss,
-                        # np.mean(dur)
-                        dur,
+                        epoch_avg_val_loss,
+                        time.time() - epoch_val_start_time,
                     )
                 )
 
-            # save check_point
-            if (epoch_ndx + 1) % self.cli_args.checkpoint_save_step == 0 or (
+            # Save model if needed (either at checkpoint or at end of training)
+            if (epoch_ndx + 1) % self.args.checkpoint_save_step == 0 or (
                 epoch_ndx + 1
-            ) == self.cli_args.epoch:
-                if not os.path.exists(self.cli_args.checkpoint_dir):
-                    os.mkdir(self.cli_args.checkpoint_dir)
-                check_point_path = os.path.join(
-                    self.cli_args.checkpoint_dir, "epoch-%d.pkl" % (epoch_ndx + 1)
+            ) == self.args.epoch:
+                save_path = os.path.join(
+                    save_directory, "epoch-%d.pkl" % (epoch_ndx + 1)
                 )
                 torch.save(
                     {
@@ -518,56 +509,64 @@ class TrainingApp:
                         "state_dict": self.model.state_dict(),
                         "optimizer": self.optimizer.state_dict(),
                     },
-                    check_point_path,
+                    save_path,
                 )
-                print("save checkpoint %s", check_point_path)
+                log.info(
+                    "Checkpoint saved at epoch {}: {}".format(epoch_ndx + 1, save_path)
+                )
 
         log.info(
             "Training finished, took {:.2f}s".format(time.time() - training_start_time)
         )
 
+        # Training is done
         log.info("Saving training results...")
+        # Save the final model state
+        model_path = os.path.join(
+            save_directory, "FINAL-epoch-%d.pth" % self.args.epoch
+        )
         torch.save(
             self.model.state_dict(),
-            self.cli_args.model_dir + self.cli_args.model_name + ".pth",
+            model_path,
         )
-        log.info(f"Model saved as: {self.cli_args.model_name}")
+        log.info(f"Model saved to {model_path}")
+        # Save the training and validation loss values
         torch.save(
             avg_train_loss_values,
-            self.cli_args.model_dir
-            + "loss/"
-            + self.cli_args.model_name
-            + "_train_loss.pth",
+            os.path.join(save_directory, "train_loss.pth"),
         )
         torch.save(
             avg_val_loss_values,
-            self.cli_args.model_dir
-            + "loss/"
-            + self.cli_args.model_name
-            + "_validation_loss.pth",
+            os.path.join(save_directory, "validation_loss.pth"),
         )
+        log.info(f"Training and validation loss saved to {save_directory}")
 
-        if self.cli_args.tensor_board:
+        # Clean up tensor board writers
+        if self.args.tensor_board:
             self.trn_writer.flush()
             self.trn_writer.close()
             self.val_writer.flush()
             self.val_writer.close()
 
+        # Clean up memory
+        log.debug("Cleaning up memory...")
         gc.collect()
-        self.model = None
         del self.model
-        del train_dl, train_batch, train_truth_batch, val_dl, val_batch, val_truth_batch
-        del train_outputs, val_outputs
-        del train_loss, running_train_loss, avg_train_loss
-        del val_loss, running_val_loss, avg_val_loss
         del self.trn_writer, self.val_writer
-        # del train_psnr_batch, running_train_psnr, avg_train_psnr
-        # del val_psnr_batch, running_val_psnr, avg_val_psnr
-        # del train_ssim_batch, running_train_ssim, avg_train_ssim
-        # del val_ssim_batch, running_val_ssim, avg_val_ssim
+        del self.args
+        del self.optimizer
+        del self.criterion
+        del train_inputs, train_truths
+        del val_inputs, val_truths
+        del train_dl, val_dl
+        del train_outputs, val_outputs
+        del train_loss, val_loss
+        del epoch_total_train_loss, epoch_total_val_loss
+        del epoch_avg_train_loss, epoch_avg_val_loss
+        del avg_train_loss_values, avg_val_loss_values
+        del self.time_str
         with torch.no_grad():
             torch.cuda.empty_cache()
 
-
-if __name__ == "__main__":
-    TrainingApp().main()
+        log.debug("Memory cleanup done.")
+        log.info("Training application finished successfully.")

@@ -251,41 +251,41 @@ def get_data_sub_path(cli_args, sample):
     return sub_path
 
 
-def init_train_dataloader(training_app):
-    """Initialize the training DataLoader."""
+def init_dataloader(cli_args, sample):
+    """Initialize the DataLoader for a specific sample ('TRAIN', 'VALIDATION', or 'TEST')."""
     # Get the sub-path to the training data within the aggregation directory
-    sub_path = get_data_sub_path(training_app.cli_args, "TRAIN")
+    sub_path = get_data_sub_path(cli_args, sample)
 
-    train_images_path = os.path.join(AGG_DIR, sub_path)
-    log.info(f"Training images path: {train_images_path}")
+    images_path = os.path.join(AGG_DIR, sub_path)
+    log.info(f"{sample} images path: {images_path}")
 
     # Replace "ng" with "gated" to get the ground truth path
-    train_truth_images_path = train_images_path.replace("ng", "gated")
-    log.info(f"Training ground truth images path: {train_truth_images_path}")
+    truth_images_path = images_path.replace("ng", "gated")
+    log.info(f"{sample} ground truth images path: {truth_images_path}")
 
-    # Load the training dataset
-    train_set = PairNumpySet(train_images_path, train_truth_images_path)
+    # Load the dataset
+    dataset = PairNumpySet(images_path, truth_images_path)
     log.info(
-        f"Training dataset loaded with {len(train_set)} samples, each with shape {train_set[0][0].shape}."
+        f"{sample} dataset loaded with {len(dataset)} samples, each with shape {dataset[0][0].shape}."
     )
 
-    n_batches = training_app.cli_args.batch_size
-    n_workers = training_app.cli_args.num_workers
-    bool_shuffle = training_app.cli_args.shuffle
+    n_batches = cli_args.batch_size
+    n_workers = cli_args.num_workers
+    bool_shuffle = cli_args.shuffle
 
-    # Create the train dataloader
-    train_dl = torch.utils.data.DataLoader(
-        train_set,
+    # Create the dataloader
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
         batch_size=n_batches,
         num_workers=n_workers,
         pin_memory=bool_shuffle,
         shuffle=bool_shuffle,
     )
     log.info(
-        f"Training dataload initialized with {len(train_dl)} batches of size {n_batches}, with {n_workers} workers, shuffle={bool_shuffle}, and pin_memory={bool_shuffle}."
+        f"{sample} dataloader initialized with {len(dataloader)} batches of size {n_batches}, with {n_workers} workers, shuffle={bool_shuffle}, and pin_memory={bool_shuffle}."
     )
 
-    return train_dl
+    return dataloader
 
 
 class TrainingApp:
@@ -307,113 +307,12 @@ class TrainingApp:
         self.criterion = init_loss(self.cli_args)
         self.optimizer = init_optimizer(self.cli_args, self.model)
 
-    def initValDl(self):
-        if self.cli_args.reload_data:
-            log.info("Reloading Validation Data Sets...")
-            if self.cli_args.input_type == "FDK":
-                if self.cli_args.DEBUG:
-                    log.info("Validation input type: FDK")
-                val_sets = CTSet(
-                    self.cli_args.data_path
-                    + f"DS{self.cli_args.data_ver}/"
-                    + "validation/ns/"
-                )
-            elif self.cli_args.input_type == "PL":
-                if self.cli_args.DEBUG:
-                    log.info("Validation input type: PL")
-                val_sets = CTSet(
-                    self.cli_args.data_path
-                    + f"DS{self.cli_args.data_ver}/"
-                    + "validation/pl/"
-                )
-            else:
-                log.info("Enter either FDK or PL as input_type!")
-
-            val_truth_sets = CTSet(
-                self.cli_args.data_path
-                + f"DS{self.cli_args.data_ver}/"
-                + "validation/full/"
-            )
-
-            val_images = val_sets[0]
-            val_truth_images = val_truth_sets[0]
-            for idx in range(val_sets.__len__() - 1):
-                val_images = torch.cat((val_images, val_sets[idx + 1]), 0)
-                val_truth_images = torch.cat(
-                    (val_truth_images, val_truth_sets[idx + 1]), 0
-                )
-        else:
-            log.info("Loading Validation Data Sets From Saved Tensor...")
-            if self.cli_args.input_type == "FDK":
-                if self.cli_args.DEBUG:
-                    log.info("Validation input type: FDK")
-                if self.cli_args.augment:
-                    val_images = torch.load(
-                        self.cli_args.data_path
-                        + f"DS{self.cli_args.data_ver}/"
-                        + "validation/ns/val_ns_aug.pt"
-                    )
-                else:
-                    val_images = torch.load(
-                        self.cli_args.data_path
-                        + f"DS{self.cli_args.data_ver}/"
-                        + "validation/ns/val_ns.pt"
-                    )
-            elif self.cli_args.input_type == "PL":
-                if self.cli_args.DEBUG:
-                    log.info("Validation input type: PL")
-                if self.cli_args.augment:
-                    val_images = torch.load(
-                        self.cli_args.data_path
-                        + f"DS{self.cli_args.data_ver}/"
-                        + f"validation/pl/val_pl_b{self.cli_args.pl_ver}_aug.pt"
-                    )
-                else:
-                    val_images = torch.load(
-                        self.cli_args.data_path
-                        + f"DS{self.cli_args.data_ver}/"
-                        + "validation/ns/val_ns.pt"
-                    )
-            else:
-                log.info("Enter either FDK or PL as input_type!")
-            if self.cli_args.augment:
-                val_truth_images = torch.load(
-                    self.cli_args.data_path
-                    + f"DS{self.cli_args.data_ver}/"
-                    + "validation/full/val_full_aug.pt"
-                )
-            else:
-                val_truth_images = torch.load(
-                    self.cli_args.data_path
-                    + f"DS{self.cli_args.data_ver}/"
-                    + "validation/full/val_full.pt"
-                )
-
-        if self.cli_args.DEBUG:
-            log.info(f"Validation Sample Shape: {val_images.shape}")
-
-        val_set = PairSet(val_images, val_truth_images)
-
-        n_batches = self.cli_args.batch_size
-        n_workers = self.cli_args.num_workers
-        bool_shuffle = self.cli_args.shuffle
-
-        val_dl = torch.utils.data.DataLoader(
-            val_set,
-            batch_size=n_batches,
-            num_workers=n_workers,
-            pin_memory=bool_shuffle,
-            shuffle=bool_shuffle,
-        )
-
-        return val_dl
-
     def main(self):
         log.info("Starting {}, {}".format(type(self).__name__, self.cli_args))
 
-        train_dl = init_train_dataloader(self)
+        train_dl = init_dataloader(self.cli_args, "TRAIN")
         log.info(f"Initialized training dataloader with {len(train_dl)} batches.")
-        val_dl = self.initValDl()
+        val_dl = init_dataloader(self.cli_args, "VALIDATION")
         log.info(f"Initialized validation dataloader with {len(val_dl)} batches.")
 
         if self.cli_args.tensor_board:

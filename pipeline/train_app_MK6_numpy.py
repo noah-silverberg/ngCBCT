@@ -214,9 +214,10 @@ class TrainingApp:
         )
         # Make sure we're not accidentally overwriting an existing model version
         if os.path.exists(save_directory):
-            raise FileExistsError(
+            logger.error(
                 f"Save directory {save_directory} already exists. Please choose a different model version or delete the existing directory, or manually delete this."
             )
+            return
         # Create the directory
         ensure_dir(save_directory)
 

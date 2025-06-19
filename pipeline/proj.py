@@ -4,7 +4,9 @@ import mat73
 import torch.nn as nn
 
 
-def load_projection_mat(patient: str, scan: str, scan_type: str, WORK_ROOT: str):
+def load_projection_mat(
+    patient: str, scan: str, scan_type: str, WORK_ROOT: str, exclude_prj=False
+):
     """
     Load projection data from a .mat file.
 
@@ -12,6 +14,8 @@ def load_projection_mat(patient: str, scan: str, scan_type: str, WORK_ROOT: str)
         patient (str): Patient identifier (e.g., '13'), scalar string.
         scan (str): Scan identifier (e.g., '01'), scalar string.
         scan_type (str): Type of scan (e.g., 'HF'), scalar string.
+        WORK_ROOT (str): Path to the working directory.
+        exclude_prj (bool): If True, only load odd_index and angles, not prj.
 
     Returns:
         odd_index (np.ndarray): shape (K,), 1-based indices of nonstop-gated angles.
@@ -20,10 +24,16 @@ def load_projection_mat(patient: str, scan: str, scan_type: str, WORK_ROOT: str)
     """
     # Load projection mat file for a given scan
     mat_path = f"{WORK_ROOT}/raw_data/p{patient}.{scan_type}{scan}.{scan_type}.mat"  # TODO change path as needed
-    mat = mat73.loadmat(mat_path)
+    if exclude_prj:
+        mat = mat73.loadmat(mat_path, only_include=["odd_index", "angles"])
+    else:
+        mat = mat73.loadmat(mat_path)
 
     odd_index = np.array(mat["odd_index"])  # angle indices to keep for nonstop gated
     angles = torch.from_numpy(np.array(mat["angles"])).float()  # angles acquired
+    if exclude_prj:
+        return odd_index, angles
+
     prj = torch.from_numpy(np.array(mat["prj"])).float()  # sinogram projections
     return odd_index, angles, prj
 

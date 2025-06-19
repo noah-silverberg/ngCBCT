@@ -1,27 +1,26 @@
 import os
 import numpy as np
 import torch
-import scipy.io
-import mat73
-from .config import (
-    MODEL_DIR,
-    PROJ_DIR,
-    CUDA_DEVICE,
-)
 from .proj import load_projection_mat
-from .utils import plot_loss, ensure_dir, display_slices_grid, plot_single_slices
 from . import network_instance
 
 
-def load_model(network_name: str, model_name: str, device=None):
+def load_model(
+    network_name: str, model_name: str, device, MODEL_DIR, data_version, domain
+):
     # Load and instantiate the network class dynamically
     model = getattr(network_instance, network_name)()
 
     # Load the model state and send it to the GPU
-    state = torch.load(os.path.join(MODEL_DIR, f"{model_name}.pth"))
+    state = torch.load(
+        os.path.join(
+            MODEL_DIR,
+            model_name,
+            f"{network_name}_{model_name}_DS{data_version}_{'ID' if domain == 'IMAG' else 'PD'}.pth",
+        )
+    )
     model.load_state_dict(state)
-    if device:
-        model = model.to(device)
+    model = model.to(device)
 
     # Set the model to eval mode for inference
     # NOTE: If you want to use it for training or MC dropout, you can just turn it back to train mode
@@ -31,14 +30,24 @@ def load_model(network_name: str, model_name: str, device=None):
 
 
 def apply_model_to_projections(
-    patient: str, scan: str, scan_type: str, sample: str, model: torch.nn.Module
+    patient: str,
+    scan: str,
+    scan_type: str,
+    sample: str,
+    model: torch.nn.Module,
+    PROJ_DIR,
+    CUDA_DEVICE,
+    WORK_ROOT,
 ):
     """Apply CNN model slice-wise to nonstop-gated projections to predict missing projections and combine."""
     # Set up CUDA
     device = torch.device(CUDA_DEVICE)
 
     # Get the acquired nonstop-gated indices and angles from the .mat file
-    odd_index, angles, _ = load_projection_mat(patient, scan, scan_type)
+    # NOTE: excluding prj speeds it up a bit
+    odd_index, angles = load_projection_mat(
+        patient, scan, scan_type, WORK_ROOT, exclude_prj=True
+    )
 
     # Gated and nonstop-gated subdirectories
     g_dir = os.path.join(PROJ_DIR, "gated")
@@ -53,6 +62,11 @@ def apply_model_to_projections(
         os.path.join(ng_dir, f"{scan_type}_p{patient}_{scan}_{sample}.pt")
     ).detach()
 
+    # We pass the whole scan through the model at once
+    with torch.no_grad():
+        prj_ngcbct_li = prj_ngcbct_li.to(device)
+        out = model(prj_ngcbct_li).cpu()
+
     # Flip angles if necessary
     angles = torch.from_numpy(np.array(sorted(angles))).float()
     angles1 = -(angles + np.pi / 2)
@@ -63,9 +77,6 @@ def apply_model_to_projections(
     # Get the total number of angles from the gated scan
     num_angles = len(angles1)
 
-    # Remove channel dim for processing
-    prj_ngcbct_li = torch.squeeze(prj_ngcbct_li, 1)
-
     # Initialize output tensor for full sinogram output
     prj_ngcbct_cnn = torch.zeros((num_angles, 382, 510)).detach().to(device)
 
@@ -74,15 +85,11 @@ def apply_model_to_projections(
     v_dim = 512 if scan_type == "HF" else 256
     overlap = v_dim * 2 - num_angles
 
-    # Loop over the slices, pass them through the model, and put the results in the output tensor
+    # Loop over the outputted slices, put the results in the output tensor
     for i in range(382):
-        # Run the first half of the projection through the model
-        img1 = prj_ngcbct_li[i].detach().to(device)
-        out1 = model(torch.unsqueeze(img1, 0)).detach().cpu()
-
-        # Run the second half of the projection through the model
-        img2 = prj_ngcbct_li[i + 382].detach().to(device)
-        out2 = model(torch.unsqueeze(img2, 0)).detach().cpu()
+        # Get the slices from the first and second halves
+        out1 = torch.unsqueeze(out[i], 0)
+        out2 = torch.unsqueeze(out[i + 382], 0)
 
         # If there is overlap between the two halves, average the overlapping region
         if overlap >= 0:

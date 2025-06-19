@@ -370,7 +370,7 @@ class TrainingApp:
             ):
                 save_path = os.path.join(
                     save_directory,
-                    f"epoch-{epoch_ndx:2}_{'ID' if self.config['domain'] == 'IMAG' else 'PD'}.pkl",
+                    f"epoch-{epoch_ndx:02}_{'ID' if self.config['domain'] == 'IMAG' else 'PD'}.pkl",
                 )
                 torch.save(
                     {
@@ -384,6 +384,21 @@ class TrainingApp:
                     "Checkpoint saved at epoch {}: {}\n".format(epoch_ndx, save_path)
                 )
 
+                # Delete most recent checkpoint to save space
+                if epoch_ndx > self.config["checkpoint_save_step"]:
+                    old_save_path = os.path.join(
+                        save_directory,
+                        f"epoch-{epoch_ndx - self.config['checkpoint_save_step']:02}_{'ID' if self.config['domain'] == 'IMAG' else 'PD'}.pkl",
+                    )
+                    if os.path.exists(old_save_path):
+                        os.remove(old_save_path)
+                        logger.debug(
+                            "Old checkpoint removed from epoch {}: {}".format(
+                                epoch_ndx - self.config["checkpoint_save_step"],
+                                old_save_path,
+                            )
+                        )
+
         logger.info(
             "Training finished, took {:.2f}s\n".format(
                 time.time() - training_start_time
@@ -395,7 +410,7 @@ class TrainingApp:
         # Save the final model state
         model_path = os.path.join(
             save_directory,
-            f"{self.config['network_name']}_{self.config['model_version']}_DS{self.config['data_version']}_{'ID' if self.config['domain'] == 'IMAG' else 'PD'}.pth",
+            f"{self.config['network_name']}_{self.config['model_version']}_DS{self.config['data_version']}_{self.config['scan_type']}_{'ID' if self.config['domain'] == 'IMAG' else 'PD'}.pth",
         )
         torch.save(
             self.model.state_dict(),

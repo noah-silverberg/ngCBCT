@@ -208,6 +208,18 @@ class TrainingApp:
         self.criterion = init_loss(self.config)
 
     def main(self):
+        # We will save all the outputs from training in this directory
+        save_directory = os.path.join(
+            self.config["MODEL_DIR"], self.config["model_version"]
+        )
+        # Make sure we're not accidentally overwriting an existing model version
+        if os.path.exists(save_directory):
+            raise FileExistsError(
+                f"Save directory {save_directory} already exists. Please choose a different model version or delete the existing directory, or manually delete this."
+            )
+        # Create the directory
+        ensure_dir(save_directory)
+
         logger.debug("Starting {}, {}".format(type(self).__name__, self.config))
 
         # Get the dataloaders for training and validation
@@ -219,12 +231,6 @@ class TrainingApp:
             self.trn_writer, self.val_writer = init_tensorboard_writers(
                 self.config, self.time_str
             )
-
-        # Make sure we have a valid directory for saving the model/checkpoints
-        save_directory = os.path.join(
-            self.config["MODEL_DIR"], self.config["model_version"]
-        )
-        ensure_dir(save_directory)
 
         # Summarize training settings
         logger.info("TRAINING SETTINGS:")
@@ -253,8 +259,6 @@ class TrainingApp:
                 learning_rate = self.config["learning_rate"][
                     min(epoch_ndx - 1, len(self.config["learning_rate"]) - 1)
                 ]
-
-            logger.debug(f"Epoch: {epoch_ndx}, Learning Rate: {learning_rate}")
 
             # Initialize the optimizer with the current learning rate
             self.optimizer = init_optimizer(learning_rate, self.config, self.model)
@@ -351,7 +355,7 @@ class TrainingApp:
                     self.val_writer.add_scalar("Loss", epoch_avg_val_loss, epoch_ndx)
 
                 logger.info(
-                    "Epoch: {} \tAvg Validation Loss: {:.6f}  \tTime(s) {:.4f}".format(
+                    "Epoch: {} \tAvg Validation Loss: {:.6f}  \tTime(s) {:.4f}\n".format(
                         epoch_ndx,
                         epoch_avg_val_loss,
                         time.time() - epoch_val_start_time,
@@ -373,18 +377,20 @@ class TrainingApp:
                     save_path,
                 )
                 logger.info(
-                    "Checkpoint saved at epoch {}: {}".format(epoch_ndx, save_path)
+                    "Checkpoint saved at epoch {}: {}\n".format(epoch_ndx, save_path)
                 )
 
         logger.info(
-            "Training finished, took {:.2f}s".format(time.time() - training_start_time)
+            "Training finished, took {:.2f}s\n".format(
+                time.time() - training_start_time
+            )
         )
 
         # Training is done
         logger.info("Saving training results...")
         # Save the final model state
         model_path = os.path.join(
-            save_directory, "FINAL-epoch-%d.pth" % self.config["epochs"]
+            save_directory, "epoch-%d.pth" % self.config["epochs"]
         )
         torch.save(
             self.model.state_dict(),
@@ -400,7 +406,7 @@ class TrainingApp:
             avg_val_loss_values,
             os.path.join(save_directory, "validation_loss.pth"),
         )
-        logger.info(f"Training and validation loss saved to {save_directory}")
+        logger.info(f"Training and validation loss saved to {save_directory}\n")
 
         # Clean up tensor board writers
         if self.config["tensor_board"]:
@@ -417,7 +423,8 @@ class TrainingApp:
         # So we catch any exceptions that might occur during cleanup
         try:
             del self.model
-            del self.trn_writer, self.val_writer
+            if self.config["tensor_board"]:
+                del self.trn_writer, self.val_writer
             del self.config
             del self.optimizer
             del self.criterion

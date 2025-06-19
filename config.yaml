@@ -22,7 +22,7 @@ PD_settings:
   tensor_board_comment: ""  # If using TensorBoard, a comment suffix
   train_during_inference: false  # Whether to put the model in training mode during inference (e.g., for MC dropout)
   ensemble_size: 1 # Number of models to train
-  scan_type: "HF" # Scan type for PD training (HF or FF)
+  scan_type: "HF" # Scan type for PD training (HF or FF) -- make sure it matches the aggregated data
 
   # Ignore -- not used for PD training (just have to be defined)
   augment: null

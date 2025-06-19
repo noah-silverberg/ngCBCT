@@ -232,15 +232,14 @@ class TrainSet(Dataset):
 
 
 class PrjSet(Dataset):
-    def __init__(self, base_dir, scan_type, sample):
+    def __init__(self, base_dir, scans):
         super(PrjSet, self).__init__()
         # self.transforms = transforms  # make sure transforms has at leat ToTensor()
         self.data = []  # store all data here
         # go over all files in base_dir
-        for file in sorted(os.listdir(base_dir)):
-            if file.startswith(f"{scan_type}_") and file.endswith(f"_{sample}.pt"):
-                self.prj = torch.load(os.path.join(base_dir, file))
-                self.data.append(self.prj)
+        for patient, scan, scan_type in scans:
+            self.prj = torch.load(os.path.join(base_dir, f'{scan_type}_p{patient}_{scan}.pt'))
+            self.data.append(self.prj)
 
     def __len__(self):
         return len(self.data)

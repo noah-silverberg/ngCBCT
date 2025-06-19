@@ -6,25 +6,27 @@ import logging
 logger = logging.getLogger("pipeline")
 
 
-def aggregate_saved_projections(scan_type: str, sample: str, PROJ_DIR: str):
+def aggregate_saved_projections(scan_type: str, sample: str, prj_pt_dir: str, AGG_SCANS: dict):
     """
     Load per-scan projection tensors, concatenate across scans, and save aggregates.
 
     Args:
         scan_type (str): Type of scan, e.g. 'HF', 'FF'.
         sample (str): Data split name, e.g. 'train', 'validation', 'test'.
+        prj_pt_dir (str): Directory where processed projections are saved.
+        AGG_SCANS (dict): Dictionary with samples as keys and scans as values, as (patient, scan, scan_type).
 
     Returns:
         prj_gcbct (torch.Tensor): Concatenated gated projections tensor.
         prj_ngcbct (torch.Tensor): Concatenated nonstop-gated projections tensor.
     """
     # Gated and nonstop-gated subdirectories
-    g_dir = os.path.join(PROJ_DIR, "gated")
-    ng_dir = os.path.join(PROJ_DIR, "ng")
+    g_dir = os.path.join(prj_pt_dir, "gated")
+    ng_dir = os.path.join(prj_pt_dir, "ng")
 
     # Create ground truth dataset, and concatenate all scans into one tensor
     # along the H dimension (i.e., the dimension where we already stacked them before saving -- see "divide_sinogram" in proj.py)
-    truth_set = PrjSet(g_dir, scan_type, sample)
+    truth_set = PrjSet(g_dir, scan_type, AGG_SCANS[sample])
 
     # Ensure scans were found
     if len(truth_set) == 0:

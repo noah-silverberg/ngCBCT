@@ -2,7 +2,7 @@
 # PD Training settings
 PD_settings:
   training: true # Whether to train the PD model
-  training_app: "train_app_MK6numpy.TrainingApp"
+  training_app: "train_app_MK6_numpy.TrainingApp"
   epochs: 20 # Number of epochs for PD training
   learning_rate: 1e-3  # Either float or list (if the list is shorter than the number of epochs, the last value is used for the rest of the epochs)
   network_name: "IResNet"  # Network name for PD CNN (see network_instance.py)

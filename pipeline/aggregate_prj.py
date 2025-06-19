@@ -3,6 +3,8 @@ import os
 from .dsets import PrjSet
 import logging
 
+logger = logging.getLogger("pipeline")
+
 
 def aggregate_saved_projections(scan_type: str, sample: str, PROJ_DIR: str):
     """
@@ -30,14 +32,14 @@ def aggregate_saved_projections(scan_type: str, sample: str, PROJ_DIR: str):
             f"No gated scans found for scan type {scan_type} and sample {sample}"
         )
 
-    logging.debug(
+    logger.debug(
         f"Found {len(truth_set)} gated scans for scan type {scan_type} and sample {sample}"
     )
 
     prj_gcbct = truth_set[0]
     for idx in range(1, len(truth_set)):
         prj_gcbct = torch.cat((prj_gcbct, truth_set[idx]), dim=0)
-    logging.debug(f"Aggregated gated projections shape: {prj_gcbct.shape}")
+    logger.debug(f"Aggregated gated projections shape: {prj_gcbct.shape}")
 
     # Repeat for nonstop-gated projections
     ns_set = PrjSet(ng_dir, scan_type, sample)
@@ -48,13 +50,13 @@ def aggregate_saved_projections(scan_type: str, sample: str, PROJ_DIR: str):
             f"No nonstop-gated scans found for scan type {scan_type} and sample {sample}"
         )
 
-    logging.debug(
+    logger.debug(
         f"Found {len(ns_set)} nonstop-gated scans for scan type {scan_type} and sample {sample}"
     )
 
     prj_ngcbct = ns_set[0]
     for idx in range(1, len(ns_set)):
         prj_ngcbct = torch.cat((prj_ngcbct, ns_set[idx]), dim=0)
-    logging.debug(f"Aggregated nonstop-gated projections shape: {prj_ngcbct.shape}")
+    logger.debug(f"Aggregated nonstop-gated projections shape: {prj_ngcbct.shape}")
 
     return prj_gcbct, prj_ngcbct

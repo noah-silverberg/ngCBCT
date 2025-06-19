@@ -368,7 +368,10 @@ class TrainingApp:
                 epoch_ndx % self.config["checkpoint_save_step"] == 0
                 or epoch_ndx == self.config["epochs"]
             ):
-                save_path = os.path.join(save_directory, "epoch-%d.pkl" % epoch_ndx)
+                save_path = os.path.join(
+                    save_directory,
+                    f"epoch-{epoch_ndx:2}_{'ID' if self.config['domain'] == 'IMAG' else 'PD'}.pkl",
+                )
                 torch.save(
                     {
                         "epoch": epoch_ndx,
@@ -391,7 +394,8 @@ class TrainingApp:
         logger.info("Saving training results...")
         # Save the final model state
         model_path = os.path.join(
-            save_directory, "epoch-%d.pth" % self.config["epochs"]
+            save_directory,
+            f"{self.config['network_name']}_{self.config['model_version']}_DS{self.config['data_version']}_{'ID' if self.config['domain'] == 'IMAG' else 'PD'}.pth",
         )
         torch.save(
             self.model.state_dict(),
@@ -401,11 +405,17 @@ class TrainingApp:
         # Save the training and validation loss values
         torch.save(
             avg_train_loss_values,
-            os.path.join(save_directory, "train_loss.pth"),
+            os.path.join(
+                save_directory,
+                f"train_loss_{'ID' if self.config['domain'] == 'IMAG' else 'PD'}.pth",
+            ),
         )
         torch.save(
             avg_val_loss_values,
-            os.path.join(save_directory, "validation_loss.pth"),
+            os.path.join(
+                save_directory,
+                f"validation_loss_{'ID' if self.config['domain'] == 'IMAG' else 'PD'}.pth",
+            ),
         )
         logger.info(f"Training and validation loss saved to {save_directory}\n")
 

@@ -148,7 +148,7 @@ def init_dataloader(config: dict, sample):
         dataset,
         batch_size=n_batches,
         num_workers=n_workers,
-        pin_memory=bool_shuffle,  # TODO why is this the same as shuffle?
+        pin_memory=bool_shuffle,
         shuffle=bool_shuffle,
     )
     logger.debug(

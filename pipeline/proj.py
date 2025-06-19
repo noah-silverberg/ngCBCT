@@ -23,7 +23,7 @@ def load_projection_mat(
         prj (torch.Tensor): shape (W, H, A), gated projection data.
     """
     # Load projection mat file for a given scan
-    mat_path = f"{WORK_ROOT}/raw_data/p{patient}.{scan_type}{scan}.{scan_type}.mat"  # TODO change path as needed
+    mat_path = f"{WORK_ROOT}/data/prj/{scan_type}/mat/p{patient}.{scan_type}{scan}.{scan_type}.mat"
     if exclude_prj:
         mat = mat73.loadmat(mat_path, only_include=["odd_index", "angles"])
     else:

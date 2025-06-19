@@ -1,12 +1,12 @@
 import torch
 import os
-from .dsets import PrjSet
 import logging
+from tqdm import tqdm
 
 logger = logging.getLogger("pipeline")
 
 
-def aggregate_saved_projections(scan_type: str, sample: str, prj_pt_dir: str, AGG_SCANS: dict):
+def aggregate_saved_projections(scan_type: str, sample: str, prj_pt_dir: str, AGG_SCANS: dict, truth: bool):
     """
     Load per-scan projection tensors, concatenate across scans, and save aggregates.
 
@@ -20,45 +20,29 @@ def aggregate_saved_projections(scan_type: str, sample: str, prj_pt_dir: str, AG
         prj_gcbct (torch.Tensor): Concatenated gated projections tensor.
         prj_ngcbct (torch.Tensor): Concatenated nonstop-gated projections tensor.
     """
-    # Gated and nonstop-gated subdirectories
-    g_dir = os.path.join(prj_pt_dir, "gated")
-    ng_dir = os.path.join(prj_pt_dir, "ng")
+    # Gated or nonstop-gated subdirectory
+    dir = os.path.join(prj_pt_dir, "gated" if truth else "ng")
 
-    # Create ground truth dataset, and concatenate all scans into one tensor
+    # Extract the scans for the given sample
+    scans = AGG_SCANS[sample]
+
+    # Concatenate all scans into one tensor
     # along the H dimension (i.e., the dimension where we already stacked them before saving -- see "divide_sinogram" in proj.py)
-    truth_set = PrjSet(g_dir, AGG_SCANS[sample])
+    for i, (patient, scan, scan_type) in tqdm(enumerate(scans), desc="Aggregating projections"):
+        prj = torch.load(os.path.join(dir, f'{scan_type}_p{patient}_{scan}.pt')).detach()
 
-    # Ensure scans were found
-    if len(truth_set) == 0:
-        raise ValueError(
-            f"No gated scans found for scan type {scan_type} and sample {sample}"
-        )
+        if i == 0:
+            # Allocate an empty tensor for the aggregated projections
+            # We assume all projections have the same shape
+            prj_agg = torch.empty(
+                (len(scans) * prj.shape[0], prj.shape[1], prj.shape[2], prj.shape[3]),
+                dtype=prj.dtype,
+            )
 
-    logger.debug(
-        f"Found {len(truth_set)} gated scans for scan type {scan_type} and sample {sample}"
-    )
+        # Fill the allocated tensor with the loaded projections
+        prj_agg[i * prj.shape[0] : (i + 1) * prj.shape[0], ...] = prj
+        
 
-    prj_gcbct = truth_set[0]
-    for idx in range(1, len(truth_set)):
-        prj_gcbct = torch.cat((prj_gcbct, truth_set[idx]), dim=0)
-    logger.debug(f"Aggregated gated projections shape: {prj_gcbct.shape}")
+    logger.debug(f"Aggregated {'gated' if truth else 'nonstop-gated'} projections shape: {prj_agg.shape}")
 
-    # Repeat for nonstop-gated projections
-    ns_set = PrjSet(ng_dir, AGG_SCANS[sample])
-
-    # Ensure scans were found
-    if len(ns_set) == 0:
-        raise ValueError(
-            f"No nonstop-gated scans found for scan type {scan_type} and sample {sample}"
-        )
-
-    logger.debug(
-        f"Found {len(ns_set)} nonstop-gated scans for scan type {scan_type} and sample {sample}"
-    )
-
-    prj_ngcbct = ns_set[0]
-    for idx in range(1, len(ns_set)):
-        prj_ngcbct = torch.cat((prj_ngcbct, ns_set[idx]), dim=0)
-    logger.debug(f"Aggregated nonstop-gated projections shape: {prj_ngcbct.shape}")
-
-    return prj_gcbct, prj_ngcbct
+    return prj_agg

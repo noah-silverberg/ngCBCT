@@ -231,22 +231,22 @@ class TrainSet(Dataset):
         return {"A": item_A, "B": item_B}
 
 
-class PrjSet(Dataset):
-    def __init__(self, base_dir, scans):
-        super(PrjSet, self).__init__()
-        # self.transforms = transforms  # make sure transforms has at leat ToTensor()
-        self.data = []  # store all data here
-        # go over all files in base_dir
-        for patient, scan, scan_type in scans:
-            self.prj = torch.load(os.path.join(base_dir, f'{scan_type}_p{patient}_{scan}.pt'))
-            self.data.append(self.prj)
+# class PrjSet(Dataset):
+#     def __init__(self, base_dir, scans, device):
+#         super(PrjSet, self).__init__()
+#         # self.transforms = transforms  # make sure transforms has at leat ToTensor()
+#         self.data = []  # store all data here
+#         # go over all files in base_dir
+#         for patient, scan, scan_type in scans:
+#             self.prj = torch.load(os.path.join(base_dir, f'{scan_type}_p{patient}_{scan}.pt')).to(device).detach()
+#             self.data.append(self.prj)
 
-    def __len__(self):
-        return len(self.data)
+#     def __len__(self):
+#         return len(self.data)
 
-    def __getitem__(self, index):
-        train_images = self.data[index]
-        return train_images
+#     def __getitem__(self, index):
+#         train_images = self.data[index]
+#         return train_images
 
 
 class PairSet(Dataset):

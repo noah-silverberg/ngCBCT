@@ -1,0 +1,56 @@
+
+# PD Training settings
+PD_settings:
+  training: true # Whether to train the PD model
+  training_app: "train_app_MK6numpy.TrainingApp"
+  epochs: 20 # Number of epochs for PD training
+  learning_rate: 1e-3  # Either float or list (if the list is shorter than the number of epochs, the last value is used for the rest of the epochs)
+  network_name: "IResNet"  # Network name for PD CNN (see network_instance.py)
+  model_version: "MK6" # NOTE: The model names will be: [NETWORK_NAME]_[MODEL_VERSION]_DS[DATA_VERSION]_[ID/PD]
+  batch_size: 8 # Batch size for PD training
+  optimizer: "NAdam" # Optimizer for PD training (SGD, Adam, or NAdam)
+  num_workers: 0 # Number of workers for data loading (0 means only the main process will load data)
+  shuffle: true # Whether to shuffle the data at the beginning of each epoch
+  grad_clip: true # Whether to clip gradients during PD training
+  grad_max: 0.01  # Only used if grad_clip is True
+  betas_NAdam: (0.9, 0.999)  # Only for NAdam, otherwise ignored
+  momentum_decay_NAdam: 4e-4  # Only for NAdam, otherwise ignored
+  momentum_SGD: 0.99  # Only for SGD, otherwise ignored
+  weight_decay_SGD: 1e-8  # Only for SGD, otherwise ignored
+  checkpoint_save_step: 10  # Save checkpoint every N epochs
+  tensor_board: false  # Whether to use TensorBoard for PD training
+  tensor_board_comment: ""  # If using TensorBoard, a comment suffix
+  train_during_inference: false  # Whether to put the model in training mode during inference (e.g., for MC dropout)
+  ensemble_size: 1 # Number of models to train
+  scan_type: "HF" # Scan type for PD training (HF or FF)
+
+  # Ignore -- not used for PD training (just have to be defined)
+  augment: null
+  input_type: null
+
+# ID training settings
+ID_settings:
+  training: true
+  training_app: "train_app_MK6_numpy.TrainingApp"
+  epochs: 50
+  learning_rate: 1e-3
+  network_name: "IResNet"
+  model_version: "MK6"
+  batch_size: 8
+  optimizer: "NAdam"
+  num_workers: 0
+  shuffle: true
+  grad_clip: true
+  grad_max: 0.01
+  betas_NAdam: (0.9, 0.999)
+  momentum_decay_NAdam: 4e-4
+  momentum_SGD: 0.99
+  weight_decay_SGD: 1e-8
+  checkpoint_save_step: 10
+  tensor_board: false
+  tensor_board_comment: ""
+  train_during_inference: false
+  ensemble_size: 1
+  scan_type: "HF"
+  augment: true  # Whether to use augmented data for ID training
+  input_type: "FDK" # Input type for ID training (FDK or PL)

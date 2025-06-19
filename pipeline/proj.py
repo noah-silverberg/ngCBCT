@@ -2,10 +2,9 @@ import numpy as np
 import torch
 import mat73
 import torch.nn as nn
-from .config import WORK_ROOT
 
 
-def load_projection_mat(patient: str, scan: str, scan_type: str):
+def load_projection_mat(patient: str, scan: str, scan_type: str, WORK_ROOT: str):
     """
     Load projection data from a .mat file.
 

@@ -146,11 +146,3 @@ def apply_model_to_projections(
     }
 
     return g_mat, cnn_mat
-
-    # # TODO
-    # out_dir = os.path.join(WORK_ROOT, "output", "prj_mat", mode)
-    # ensure_dir(out_dir)
-    # scipy.io.savemat(
-    #     os.path.join(out_dir, f"panc{patient_id}.{mode}_ns.mat"), out_mat
-    # )
-    # return prj_ngcbct_mix

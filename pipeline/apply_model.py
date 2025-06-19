@@ -6,7 +6,7 @@ from . import network_instance
 
 
 def load_model(
-    network_name: str, model_name: str, device, MODEL_DIR, data_version, domain
+    network_name: str, model_name: str, device, MODEL_DIR, data_version, domain, scan_type
 ):
     # Load and instantiate the network class dynamically
     model = getattr(network_instance, network_name)()
@@ -16,7 +16,7 @@ def load_model(
         os.path.join(
             MODEL_DIR,
             model_name,
-            f"{network_name}_{model_name}_DS{data_version}_{'ID' if domain == 'IMAG' else 'PD'}.pth",
+            f"{network_name}_{model_name}_DS{data_version}_{scan_type}_{'ID' if domain == 'IMAG' else 'PD'}.pth",
         )
     )
     model.load_state_dict(state)
@@ -33,11 +33,11 @@ def apply_model_to_projections(
     patient: str,
     scan: str,
     scan_type: str,
-    sample: str,
     model: torch.nn.Module,
-    PROJ_DIR,
+    g_dir,
+    ng_dir,
     CUDA_DEVICE,
-    WORK_ROOT,
+    nsg_gated_path,
 ):
     """Apply CNN model slice-wise to nonstop-gated projections to predict missing projections and combine."""
     # Set up CUDA
@@ -46,26 +46,17 @@ def apply_model_to_projections(
     # Get the acquired nonstop-gated indices and angles from the .mat file
     # NOTE: excluding prj speeds it up a bit
     odd_index, angles = load_projection_mat(
-        patient, scan, scan_type, WORK_ROOT, exclude_prj=True
+        patient, scan, scan_type, nsg_gated_path, exclude_prj=True
     )
-
-    # Gated and nonstop-gated subdirectories
-    g_dir = os.path.join(PROJ_DIR, "gated")
-    ng_dir = os.path.join(PROJ_DIR, "ng")
 
     # Load the gated and (interpolated) nonstop-gated projections
     # NOTE: These each have shape (2*H, 1, v_dim, 512)
     prj_gcbct = torch.load(
-        os.path.join(g_dir, f"{scan_type}_p{patient}_{scan}_{sample}.pt")
+        os.path.join(g_dir, f"{scan_type}_p{patient}_{scan}.pt")
     ).detach()
     prj_ngcbct_li = torch.load(
-        os.path.join(ng_dir, f"{scan_type}_p{patient}_{scan}_{sample}.pt")
+        os.path.join(ng_dir, f"{scan_type}_p{patient}_{scan}.pt")
     ).detach()
-
-    # We pass the whole scan through the model at once
-    with torch.no_grad():
-        prj_ngcbct_li = prj_ngcbct_li.to(device)
-        out = model(prj_ngcbct_li).cpu()
 
     # Flip angles if necessary
     angles = torch.from_numpy(np.array(sorted(angles))).float()
@@ -87,24 +78,25 @@ def apply_model_to_projections(
 
     # Loop over the outputted slices, put the results in the output tensor
     for i in range(382):
-        # Get the slices from the first and second halves
-        out1 = torch.unsqueeze(out[i], 0)
-        out2 = torch.unsqueeze(out[i + 382], 0)
+        # Get the slices from the first and second halves, and pass them through the model
+        in_ = prj_ngcbct_li[[i, i + 382]].detach().to(device)
+        with torch.no_grad():
+            out = model(in_).cpu()
 
         # If there is overlap between the two halves, average the overlapping region
         if overlap >= 0:
             # Put the non-overlapping parts of the first half
-            prj_ngcbct_cnn[0 : (v_dim - overlap), i, :] = out1[
+            prj_ngcbct_cnn[0 : (v_dim - overlap), i, :] = out[
                 0, 0, 0 : (v_dim - overlap), 1:511
             ]
 
             # Put the non-overlapping parts of the second half
-            prj_ngcbct_cnn[v_dim:, i, :] = out2[0, 0, overlap:, 1:511]
+            prj_ngcbct_cnn[v_dim:, i, :] = out[1, 0, overlap:, 1:511]
 
             # Average the overlapping parts
             prj_ngcbct_cnn[(v_dim - overlap) : v_dim, i, :] = (
-                out1[0, 0, (v_dim - overlap) : v_dim, 1:511]
-                + out2[0, 0, 0:overlap, 1:511]
+                out[0, 0, (v_dim - overlap) : v_dim, 1:511]
+                + out[1, 0, 0:overlap, 1:511]
             ) / 2.0
 
         # If there is no overlap, put the first half at the top
@@ -112,15 +104,15 @@ def apply_model_to_projections(
         # and linearly interpolate the missing gap
         else:
             # Fill the top and bottom parts of the projection
-            prj_ngcbct_cnn[0:v_dim, i, :] = out1[0, 0, :, 1:511]
-            prj_ngcbct_cnn[(v_dim - overlap) :, i, :] = out2[0, 0, :, 1:511]
+            prj_ngcbct_cnn[0:v_dim, i, :] = out[0, 0, :, 1:511]
+            prj_ngcbct_cnn[(v_dim - overlap) :, i, :] = out[1, 0, :, 1:511]
 
             # Calculate the linear interpolation for the gap
-            diff = (out2[0, 0, 0, 1:511] - out1[0, 0, -1, 1:511]) / (
+            diff = (out[1, 0, 0, 1:511] - out[0, 0, -1, 1:511]) / (
                 -overlap
             )  # note: overlap < 0 here
             for j in range(-overlap):
-                prj_ngcbct_cnn[v_dim + j, i, :] = out1[0, 0, -1, 1:511] + (j + 1) * diff
+                prj_ngcbct_cnn[v_dim + j, i, :] = out[0, 0, -1, 1:511] + (j + 1) * diff
 
     # Now we need to:
     # 1. Create a ground truth tensor with the gated projections
@@ -128,7 +120,7 @@ def apply_model_to_projections(
     #    *but* we manually overwrite the angles that were actually acquired
 
     # 1.
-    prj_gcbct_reshaped = torch.zeros((num_angles, 382, 510)).detach().to(device)
+    prj_gcbct_reshaped = torch.zeros((num_angles, 382, 510)).detach()
     for i in range(382):
         # Fill in the top and bottom parts of the ground truth projection
         prj_gcbct_reshaped[0:v_dim, i, :] = prj_gcbct[i, 0, :, 1:511]
@@ -144,12 +136,12 @@ def apply_model_to_projections(
     g_mat = {
         "angles": angles1,
         "odd_index": odd_index,
-        "prj": prj_gcbct_reshaped.numpy(),
+        "prj": prj_gcbct_reshaped.cpu().numpy(),
     }
     cnn_mat = {
         "angles": angles1,
         "odd_index": odd_index,
-        "prj": prj_ngcbct_cnn.numpy(),
+        "prj": prj_ngcbct_cnn.cpu().numpy(),
     }
 
     return g_mat, cnn_mat

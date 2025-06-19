@@ -3,6 +3,37 @@ import os
 import matplotlib.pyplot as plt
 import torch
 
+def read_scans_agg_file(path):
+    # Read the aggregation scans file and split into TRAIN/VALIDATION/TEST
+    with open(path, "r") as f:
+        lines = [l.strip() for l in f.readlines()]
+
+    # The first line is the scan type (HF or FF)
+    scan_type = lines[0]
+
+    # Assemble the blocks of scans
+    blocks = []
+    current = []
+    for line in lines[1:]:
+        if not line:
+            if current:
+                blocks.append(current)
+                current = []
+        else:
+            current.append(line)
+    if current:
+        blocks.append(current)
+
+    # Now we have blocks of scans, each block corresponds to a sample (TRAIN, VALIDATION, TEST)
+    samples = ["TRAIN", "VALIDATION", "TEST"]
+    AGG_SCANS = {sample: [] for sample in samples}
+    for sample, block in zip(samples, blocks):
+        for entry in block:
+            patient, scan = entry.split()
+            AGG_SCANS[sample].append((patient, scan, scan_type))
+
+    return AGG_SCANS, scan_type
+
 
 def ensure_dir(path):
     """Create directory if not exists."""

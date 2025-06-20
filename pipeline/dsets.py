@@ -277,6 +277,6 @@ class PairNumpySet(Dataset):
 
     def __getitem__(self, idx):
         # Load only the required slice
-        img1 = torch.tensor(self.tensor_1[idx]).float()
-        img2 = torch.tensor(self.tensor_2[idx]).float()
+        img1 = torch.from_numpy(self.tensor_1[idx])
+        img2 = torch.from_numpy(self.tensor_2[idx])
         return img1, img2  # Return as a paired sample

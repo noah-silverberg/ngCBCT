@@ -320,9 +320,9 @@ class TrainingApp:
                 enumerate(train_dl), desc=f"Epoch {epoch_ndx} Training"
             ):
 
-                # Extract the input and ground truth, and send to GPU
-                train_inputs = train_set[0].to(device)
-                train_truths = train_set[1].to(device)
+                # Extract the input and ground truth, and send to GPU as floats
+                train_inputs = train_set[0].to(device).float()
+                train_truths = train_set[1].to(device).float()
 
                 # Zero out the gradients, do a forward pass, compute the loss, and backpropagate
                 self.optimizer.zero_grad()

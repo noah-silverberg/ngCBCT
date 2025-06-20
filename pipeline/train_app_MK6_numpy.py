@@ -398,6 +398,10 @@ class TrainingApp:
                                 old_save_path,
                             )
                         )
+        
+            # Delte optimizer after each epoch
+            del self.optimizer
+            gc.collect()
 
         logger.info(
             "Training finished, took {:.2f}s\n".format(
@@ -452,7 +456,6 @@ class TrainingApp:
             if self.config["tensor_board"]:
                 del self.trn_writer, self.val_writer
             del self.config
-            del self.optimizer
             del self.criterion
             del train_inputs, train_truths
             del val_inputs, val_truths

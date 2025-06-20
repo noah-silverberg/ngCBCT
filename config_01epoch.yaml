@@ -25,7 +25,6 @@ PD_settings:
   scan_type: "HF" # Scan type for PD training (HF or FF) -- make sure it matches the aggregated data
 
   # Ignore -- not used for PD training (just have to be defined)
-  augment: null
   input_type: null
 
 # ID training settings
@@ -52,5 +51,4 @@ ID_settings:
   train_during_inference: false
   ensemble_size: 1
   scan_type: "HF"
-  augment: true  # Whether to use augmented data for ID training
   input_type: "FDK" # Input type for ID training (FDK or PL)

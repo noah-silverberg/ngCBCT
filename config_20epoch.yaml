@@ -21,11 +21,10 @@ PD_settings:
   tensor_board: false  # Whether to use TensorBoard for PD training
   tensor_board_comment: ""  # If using TensorBoard, a comment suffix
   train_during_inference: false  # Whether to put the model in training mode during inference (e.g., for MC dropout)
-  ensemble_size: 1 # Number of models to train
+  ensemble_size: 3 # Number of models to train
   scan_type: "HF" # Scan type for PD training (HF or FF) -- make sure it matches the aggregated data
 
   # Ignore -- not used for PD training (just have to be defined)
-  augment: null
   input_type: null
 
 # ID training settings
@@ -52,5 +51,4 @@ ID_settings:
   train_during_inference: false
   ensemble_size: 1
   scan_type: "HF"
-  augment: true  # Whether to use augmented data for ID training
   input_type: "FDK" # Input type for ID training (FDK or PL)

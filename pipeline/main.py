@@ -2,7 +2,6 @@ import os, yaml, copy, logging
 from tqdm import tqdm
 from pipeline.utils import ensure_dir, read_scans_agg_file, get_geometry
 from pipeline.proj import load_projection_mat, reformat_sinogram, interpolate_projections, pad_and_reshape, divide_sinogram
-from pipeline.aggregate_prj import aggregate_saved_projections
 from pipeline.aggregate_ct import aggregate_saved_recons
 from pipeline.apply_model import apply_model_to_projections, load_model
 from pipeline.FDK_half.FDK_half import FDKHalf
@@ -11,6 +10,8 @@ import torch
 import scipy.io
 import numpy as np
 import gc
+
+# TODO have some sort of unified way to get file paths
 
 logger = logging.getLogger("pipeline.runner")
 
@@ -87,15 +88,45 @@ def convert_scans(scans_convert: list[tuple], mat_path: str, g_dir: str, ng_dir:
 
     logger.info("Done converting scans.\n\n")
 
-def aggregate_projections(scans_agg, scan_type, AGG_DIR, pt_prj_dir):
-    ensure_dir(AGG_DIR)
-    for sample in ("TRAIN","VALIDATION","TEST"):
-        if not scans_agg[sample]: continue
-        for truth in (False,True):
-            arr = aggregate_saved_projections(scan_type, sample, pt_prj_dir, scans_agg, truth=truth)
-            suffix = "gated" if truth else "ng"
-            np.save(os.path.join(AGG_DIR,f"PROJ_{suffix}_{scan_type}_{sample}.npy"), arr.numpy())
-            del arr
+def aggregate_projections(scan_type: str, scans_by_split: dict, prj_pt_dir: str, output_dir: str):
+    """
+    Aggregate and save projection data for each data split and gating mode.
+
+    Args:
+        scan_type (str): e.g., 'HF' or 'FF'.
+        scans_by_split (dict): {split_name: [(patient, scan, scan_type), ...], ...}.
+        prj_pt_dir (str): Base directory containing 'gated' and 'ng' subfolders with .pt files.
+        output_dir (str): Directory where aggregated .npy files will be saved.
+    """
+    # Ensure the target directory exists
+    ensure_dir(output_dir)
+    # Iterate over each subset (TRAIN, VALIDATION, TEST)
+    for split, scans in scans_by_split.items():
+        if not scans:
+            logger.info(f"No scans to aggregate for split: {split}")
+            continue
+        # Process gated and non-gated data
+        for is_gated in (True, False):
+            suffix = 'gated' if is_gated else 'ng'
+            proj_dir = os.path.join(prj_pt_dir, suffix)
+            logger.info(f"Starting aggregation: {suffix} scans for {split}")
+            tensors = []
+            # Load each scan tensor
+            for patient, scan, stype in tqdm(scans, desc=f"{suffix} | {split}"):
+                file_name = f"{stype}_p{patient}_{scan}.pt"
+                file_path = os.path.join(proj_dir, file_name)
+                tensor = torch.load(file_path).detach()
+                tensors.append(tensor)
+            if not tensors:
+                logger.warning(f"No {suffix} tensors found for split {split}, skipping.")
+                continue
+            # Concatenate along the first dimension
+            aggregated = torch.cat(tensors, dim=0)
+            output_file = f"PROJ_{suffix}_{scan_type}_{split}.npy"
+            save_path = os.path.join(output_dir, output_file)
+            # Save aggregated NumPy array
+            np.save(save_path, aggregated.numpy())
+            logger.info(f"Saved aggregated data to: {output_file}")
     logger.info("aggregate_projections done.")
 
 def train_stage(config_files, domain, paths, id_or_pd):
@@ -154,7 +185,7 @@ STAGES = {
     "train_pd" : lambda *a: train_stage(*a, "PD"),
     "apply_pd_fdk" : lambda *a: apply_pd_and_fdk(*a, "PD"),
     "train_id" : lambda *a: train_stage(*a, "ID"),
-    "apply_id" : lambda *a: apply_id(*a, "ID"),
+    # "apply_id" : lambda *a: apply_id(*a, "ID"), TODO
 }
 
 def run_pipeline(steps, context):

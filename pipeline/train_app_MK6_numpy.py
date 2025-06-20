@@ -31,35 +31,58 @@ else:
         "CUDA is not available. Please check your PyTorch installation or GPU setup. Proceeding with CPU...this will be slow."
     )
 
-import os, psutil, gc, torch, sys
+import os, gc, psutil, torch
+from collections import defaultdict
 
 proc = psutil.Process(os.getpid())
 
 
-def mb(x):
-    return x / 1024**2  # bytes → MB
+def _mb(bytes_):  # helper: bytes → MB
+    return bytes_ / 1024**2
 
 
-def dump_batch_mem(tag=""):
-    """Print per-object and total RAM after the current batch."""
-    print(f"\n== {tag} ==")
+def report_mem(tag: str = "") -> None:
+    """
+    Print a high-level memory snapshot:
+    • total RSS
+    • GPU allocated / reserved
+    • 15 largest unique tensor storages on *both* CPU and GPU
+    """
+    print(f"\n===== MEM SNAPSHOT: {tag} =====")
 
-    # 1. Total process RSS
-    rss = proc.memory_info().rss
-    print(f"Total RSS: {mb(rss):7.1f} MB")
+    # 1) overall process RSS
+    rss = _mb(proc.memory_info().rss)
+    print(f"Host RSS: {rss:8.1f} MB")
 
-    # 2. Live tensors on CPU (shallow walk via gc)
-    cpu_tensors = [
-        t for t in gc.get_objects() if torch.is_tensor(t) and t.device.type == "cpu"
-    ]
-    by_name = {}
-    for t in cpu_tensors:
-        size_mb = t.element_size() * t.nelement() / 1024**2
-        key = f"{tuple(t.shape)} {t.dtype}"
-        by_name[key] = by_name.get(key, 0.0) + size_mb
+    # 2) GPU
+    if torch.cuda.is_available():
+        allocated = _mb(torch.cuda.memory_allocated())
+        reserved = _mb(torch.cuda.memory_reserved())
+        print(f"GPU  alloc: {allocated:8.1f} MB   reserved: {reserved:8.1f} MB")
 
-    for k, m in sorted(by_name.items(), key=lambda x: -x[1])[:10]:
-        print(f"{m:6.1f} MB  {k}")
+    # 3) enumerate *unique* tensor storages
+    sizes = defaultdict(float)  # MB per shape / dtype / device
+    counts = defaultdict(int)  # how many tensors share the storage
+    seen_storages = set()
+
+    for obj in gc.get_objects():
+        if torch.is_tensor(obj):
+            st_ptr = obj.storage().data_ptr()
+            if st_ptr in seen_storages:  # already counted buffer
+                continue
+            seen_storages.add(st_ptr)
+
+            buf_mb = _mb(obj.element_size() * obj.storage().size())
+            key = f"{tuple(obj.shape)} {obj.dtype} on {obj.device}"
+            sizes[key] += buf_mb
+            counts[key] += 1
+
+    # 4) print top 15 buffers
+    print("\nTop live tensor buffers (unique storages):")
+    for key, mb in sorted(sizes.items(), key=lambda x: -x[1])[:15]:
+        print(f"{mb:8.1f} MB  x{counts[key]:3d}  {key}")
+
+    print("========================================")
 
 
 def init_model(config: dict):
@@ -340,7 +363,7 @@ class TrainingApp:
                 self.optimizer.step()
 
                 if b % 10 == 0:
-                    dump_batch_mem(f"Epoch {epoch_ndx} Batch {b} Training")
+                    report_mem(f"Epoch {epoch_ndx} Batch {b} Training")
 
                 # Update epoch training loss
                 epoch_total_train_loss += train_loss.item() * train_inputs.size(0)

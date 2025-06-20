@@ -288,9 +288,9 @@ class TrainingApp:
             # Loop throught the batches in the training dataloader
             for train_set in tqdm(train_dl, desc=f"Epoch {epoch_ndx} Training"):
 
-                # Extract the input and ground truth, and send to GPU as floats
-                train_inputs = train_set[0].to(device).float()
-                train_truths = train_set[1].to(device).float()
+                # Extract the input and ground truth, and send to GPU
+                train_inputs = train_set[0].to(device)
+                train_truths = train_set[1].to(device)
 
                 # Zero out the gradients, do a forward pass, compute the loss, and backpropagate
                 self.optimizer.zero_grad()

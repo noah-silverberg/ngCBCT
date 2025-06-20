@@ -264,19 +264,20 @@ class PairSet(Dataset):
 
 
 class PairNumpySet(Dataset):
-    def __init__(self, tensor_path_1, tensor_path_2):
+    def __init__(self, tensor_path_1, tensor_path_2, device):
         # Load only metadata (not full tensors)
         self.tensor_1 = np.load(tensor_path_1, mmap_mode="r")
         self.tensor_2 = np.load(tensor_path_2, mmap_mode="r")
         if self.tensor_1.shape != self.tensor_2.shape:
             raise ValueError("Tensors must have the same shape.")
         self.length = self.tensor_1.shape[0]  # Number of samples
+        self.device = device
 
     def __len__(self):
         return self.length
 
     def __getitem__(self, idx):
         # Load only the required slice
-        img1 = torch.tensor(self.tensor_1[idx]).float()
-        img2 = torch.tensor(self.tensor_2[idx]).float()
+        img1 = torch.tensor(self.tensor_1[idx]).to(self.device)
+        img2 = torch.tensor(self.tensor_2[idx]).to(self.device)
         return img1, img2  # Return as a paired sample

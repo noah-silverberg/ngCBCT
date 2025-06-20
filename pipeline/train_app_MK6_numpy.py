@@ -112,16 +112,12 @@ def get_data_sub_path(
     truth,
 ):
     """Get the sub-path for the data based on the data type."""
-    augment = config["augment"]
     domain = config["domain"]
     scan_type = config["scan_type"]
     input_type = config["input_type"]
 
-    # We need to know the input type and augmentation setting to get the right data
-    if augment:
-        sub_path = f"{domain}_{'gated' if truth else 'ng'}_{scan_type}_{sample}_aug.npy"
-    else:
-        sub_path = f"{domain}_{'gated' if truth else 'ng'}_{scan_type}_{sample}.npy"
+    # We need to know the input type to get the right data
+    sub_path = f"{domain}_{'gated' if truth else 'ng'}_{scan_type}_{sample}.npy"
 
     # If the input is PL we just add "_PL" to the end of the file name
     if domain == "IMAG":
@@ -149,7 +145,7 @@ def init_dataloader(config: dict, sample):
     logger.debug(f"{sample} ground truth images path: {truth_images_path}")
 
     # Load the dataset
-    dataset = PairNumpySet(images_path, truth_images_path)
+    dataset = PairNumpySet(images_path, truth_images_path, device)
     logger.debug(
         f"{sample} dataset loaded with {len(dataset)} samples, each with shape {dataset[0][0].shape}."
     )
@@ -163,11 +159,11 @@ def init_dataloader(config: dict, sample):
         dataset,
         batch_size=n_batches,
         num_workers=n_workers,
-        pin_memory=bool_shuffle,
+        pin_memory=False,
         shuffle=bool_shuffle,
     )
     logger.debug(
-        f"{sample} dataloader initialized with {len(dataloader)} batches of size {n_batches}, with {n_workers} workers, shuffle={bool_shuffle}, and pin_memory={bool_shuffle}."
+        f"{sample} dataloader initialized with {len(dataloader)} batches of size {n_batches}, with {n_workers} workers, shuffle={bool_shuffle}, and pin_memory={False}."
     )
 
     return dataloader
@@ -288,9 +284,9 @@ class TrainingApp:
             # Loop throught the batches in the training dataloader
             for train_set in tqdm(train_dl, desc=f"Epoch {epoch_ndx} Training"):
 
-                # Extract the input and ground truth, and send to GPU
-                train_inputs = train_set[0].to(device)
-                train_truths = train_set[1].to(device)
+                # Extract the input and ground truth (they are already on GPU)
+                train_inputs = train_set[0].float()
+                train_truths = train_set[1].float()
 
                 # Zero out the gradients, do a forward pass, compute the loss, and backpropagate
                 self.optimizer.zero_grad()

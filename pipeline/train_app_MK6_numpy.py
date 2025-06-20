@@ -193,6 +193,11 @@ class TrainingApp:
             self.config["learning_rate"] = ast.literal_eval(
                 self.config["learning_rate"]
             )
+        elif isinstance(self.config["learning_rate"], list):
+            # If learning rate is a list, evaluate each element
+            self.config["learning_rate"] = [
+                ast.literal_eval(lr) for lr in self.config["learning_rate"]
+            ]
         if isinstance(self.config["grad_max"], str):
             self.config["grad_max"] = ast.literal_eval(self.config["grad_max"])
         if isinstance(self.config["betas_NAdam"], str):
@@ -266,10 +271,8 @@ class TrainingApp:
         logger.info("STARTING TRAINING...")
         # NOTE: epoch_ndx is 1-indexed!!
         for epoch_ndx in range(1, self.config["epochs"] + 1):
-            # Update the learning rate
-            self.scheduler.step()
             logger.debug(
-                f"Learning rate updated to {self.scheduler.get_last_lr()[0]} at epoch {epoch_ndx}."
+                f"Learning rate is {self.scheduler.get_last_lr()[0]} at epoch {epoch_ndx}."
             )
 
             # Set the model to training mode
@@ -410,6 +413,9 @@ class TrainingApp:
                                 old_save_path,
                             )
                         )
+
+            # Update the learning rate
+            self.scheduler.step()
         
         logger.info(
             "Training finished, took {:.2f}s\n".format(

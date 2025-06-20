@@ -1,45 +1,62 @@
-# Implements Notebook 5: aggregate CT volumes into tensors
 import torch
 import os
-from .utils import ensure_dir
-from dsets import CTSet, AugCTSet  # assuming available
-from .config import DATA_DIR, FLAGS
+import logging
+from tqdm import tqdm
+from pipeline.dsets import normalizeInputsClip
+
+logger = logging.getLogger("pipeline")
 
 
-def aggregate_ct_volumes(
-    data_ver: str, split: str, scan_type: int, augment: bool = False, save: bool = True
-):
-    """Aggregate CT volumes (full and ns) for given split (train/validation/test)."""
-    base = os.path.join(DATA_DIR, f"DS{data_ver}")
-    full = FLAGS.get("full", True)
-    ns = FLAGS.get("ns", True)
-    # Training or validation or test
-    if full:
+def aggregate_saved_recons(scan_type: str, sample: str, recon_pt_dir: str, AGG_SCANS: dict, truth: bool, augment: bool):
+    """
+    Load per-scan reconstruction tensors, concatenate across scans, and save aggregates.
+
+    Args:
+        scan_type (str): Type of scan, e.g. 'HF', 'FF'.
+        sample (str): Data split name, e.g. 'train', 'validation', 'test'.
+        recon_pt_dir (str): Directory where processed reconstructions are saved.
+        AGG_SCANS (dict): Dictionary with samples as keys and scans as values, as (patient, scan, scan_type).
+
+    Returns:
+        recon_agg (torch.Tensor): Concatenated reconstructions tensor.
+    """
+
+    # Extract the scans for the given sample
+    scans = AGG_SCANS[sample]
+
+    # Concatenate all scans into one tensor
+    # along the 1st dim (scan dimension)
+    for i, (patient, scan, scan_type) in tqdm(enumerate(scans), desc="Aggregating reconstructions"):
+        recon = torch.load(os.path.join(recon_pt_dir, f'FDK_{'gated' if truth else 'ng'}_{scan_type}_p{patient}_{scan}.pt')).detach().float()
+        recon = normalizeInputsClip(recon)
+        recon = recon.permute(2, 0, 1)
+        recon = torch.unsqueeze(recon, 1)
+
+        if i == 0:
+            # Allocate an empty tensor for the aggregated reconstructions
+            # We assume all reconstructions have the same shape
+            if augment:
+                recon_agg = torch.empty(
+                    (3 * len(scans) * recon.shape[0], recon.shape[1], recon.shape[2], recon.shape[3]),
+                    dtype=recon.dtype,
+                ).detach()
+            else:
+                recon_agg = torch.empty(
+                    (len(scans) * recon.shape[0], recon.shape[1], recon.shape[2], recon.shape[3]),
+                    dtype=recon.dtype,
+                ).detach()
+
+        # Fill the allocated tensor with the loaded reconstructions
         if augment:
-            dataset = AugCTSet(os.path.join(base, f"{split}/full/"))
+            recon_agg[3 * i * recon.shape[0] : (3 * i + 1) * recon.shape[0], ...] = recon
+            recon_agg[(3 * i + 1) * recon.shape[0] : (3 * i + 2) * recon.shape[0], ...] = recon.flip(2)
+            recon_agg[(3 * i + 2) * recon.shape[0] : (3 * i + 3) * recon.shape[0], ...] = recon.flip(3)
         else:
-            dataset = CTSet(os.path.join(base, f"{split}/full/"))
-        imgs = dataset[0]
-        for idx in range(1, len(dataset)):
-            imgs = torch.cat((imgs, dataset[idx]), dim=0)
-        # Crop for FF if needed
-        if scan_type == 1:
-            imgs = imgs[:, :, 128:384, 128:384]
-        if save:
-            ensure_dir(os.path.join(base, f"{split}/full/"))
-            fname = f"{split}_full" + ("_aug" if augment else "") + ".pt"
-            torch.save(imgs, os.path.join(base, f"{split}/full", fname))
-    if ns:
-        if augment:
-            dataset = AugCTSet(os.path.join(base, f"{split}/ns/"))
-        else:
-            dataset = CTSet(os.path.join(base, f"{split}/ns/"))
-        imgs = dataset[0]
-        for idx in range(1, len(dataset)):
-            imgs = torch.cat((imgs, dataset[idx]), dim=0)
-        if scan_type == 1:
-            imgs = imgs[:, :, 128:384, 128:384]
-        if save:
-            ensure_dir(os.path.join(base, f"{split}/ns/"))
-            fname = f"{split}_ns" + ("_aug" if augment else "") + ".pt"
-            torch.save(imgs, os.path.join(base, f"{split}/ns", fname))
+            recon_agg[i * recon.shape[0] : (i + 1) * recon.shape[0], ...] = recon
+
+        del recon
+        
+
+    logger.debug(f"Aggregated {'gated' if truth else 'nonstop-gated'} reconstructions shape: {recon_agg.shape}")
+
+    return recon_agg

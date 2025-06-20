@@ -41,6 +41,8 @@ def aggregate_saved_projections(scan_type: str, sample: str, prj_pt_dir: str, AG
 
         # Fill the allocated tensor with the loaded projections
         prj_agg[i * prj.shape[0] : (i + 1) * prj.shape[0], ...] = prj
+
+        del prj
         
 
     logger.debug(f"Aggregated {'gated' if truth else 'nonstop-gated'} projections shape: {prj_agg.shape}")

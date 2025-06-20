@@ -37,7 +37,7 @@ def aggregate_saved_projections(scan_type: str, sample: str, prj_pt_dir: str, AG
             prj_agg = torch.empty(
                 (len(scans) * prj.shape[0], prj.shape[1], prj.shape[2], prj.shape[3]),
                 dtype=prj.dtype,
-            )
+            ).detach()
 
         # Fill the allocated tensor with the loaded projections
         prj_agg[i * prj.shape[0] : (i + 1) * prj.shape[0], ...] = prj

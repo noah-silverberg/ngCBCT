@@ -2,6 +2,8 @@
 import os
 import matplotlib.pyplot as plt
 import torch
+import tigre
+import numpy as np
 
 def read_scans_agg_file(path):
     # Read the aggregation scans file and split into TRAIN/VALIDATION/TEST
@@ -141,3 +143,58 @@ def plot_single_slices(
                 pad_inches=0,
             )
         plt.close()
+
+def get_geometry():
+    geo = tigre.geometry()
+    # VARIABLE                                   DESCRIPTION                    UNITS
+    # -------------------------------------------------------------------------------------
+    # Distances
+    geo.DSD = 1500  # Distance Source Detector      (mm)
+    geo.DSO = 1000  # Distance Source Origin        (mm)
+    # Detector parameters
+    PixelSize = 0.388  # in mm
+    rebin = 2  # we did 2x2 rebinning to make 0.776x0.776 detector bins
+    # number of pixels              (px)
+    # geo.nDetector = np.array(prj.shape[1], prj.shape[0])
+    geo.nDetector = np.array([382, 510])
+    # size of each pixel            (mm)
+    geo.dDetector = PixelSize * rebin * np.array([1, 1])
+    # total size of the detector    (mm)
+    geo.sDetector = geo.nDetector * geo.dDetector
+    # Image parameters
+    geo.nVoxel = np.array([200, 512, 512])  # number of voxels              (vx)
+    geo.dVoxel = np.array([1.0, 1.0, 1.0])  # size of each voxel            (mm)
+    geo.sVoxel = geo.nVoxel * geo.dVoxel  # total size of the image       (mm)
+
+    # Offsets
+    geo.offOrigin = np.array([0, 0, 0])  # Offset of image from origin   (mm)
+    geo.offDetector = np.array([0, 160])  # Offset of Detector            (mm)
+    # These two can be also defined
+    # per angle
+
+    # Auxiliary
+    geo.accuracy = 0.5  # Variable to define accuracy of
+    # 'interpolated' projection
+    # It defines the amoutn of
+    # samples per voxel.
+    # Recommended <=0.5             (vx/sample)
+
+    # Optional Parameters
+    # There is no need to define these unless you actually need them in your
+    # reconstruction
+
+
+    geo.COR = 0  # y direction displacement for
+    # centre of rotation
+    # correction                   (mm)
+    # This can also be defined per
+    # angle
+
+    geo.rotDetector = np.array([0, 0, 0])  # Rotation of the detector, by
+    # X,Y and Z axis respectively. (rad)
+    # This can also be defined per
+    # angle
+
+    geo.mode = "cone"  # Or 'parallel'. Geometry type.
+
+    return geo

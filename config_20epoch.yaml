@@ -6,7 +6,7 @@ PD_settings:
   epochs: 20 # Number of epochs for PD training
   learning_rate: 1e-3  # Either float or list (if the list is shorter than the number of epochs, the last value is used for the rest of the epochs)
   network_name: "IResNet"  # Network name for PD CNN (see network_instance.py)
-  model_version: "MK6" # NOTE: The model names will be: [NETWORK_NAME]_[MODEL_VERSION]_DS[DATA_VERSION]_[SCAN_TYPE]_[ID/PD]
+  model_version: "MK7" # NOTE: The model names will be: [NETWORK_NAME]_[MODEL_VERSION]_DS[DATA_VERSION]_[SCAN_TYPE]_[ID/PD]
   batch_size: 8 # Batch size for PD training
   optimizer: "NAdam" # Optimizer for PD training (SGD, Adam, or NAdam)
   num_workers: 0 # Number of workers for data loading (0 means only the main process will load data)

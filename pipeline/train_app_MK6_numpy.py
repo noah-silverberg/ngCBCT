@@ -122,9 +122,12 @@ def get_data_sub_path(
     # If the input is PL we just add "_PL" to the end of the file name
     if domain == "IMAG":
         if input_type == "PL":
-            # Add "_PL" to the end of the file name
-            sub_path = sub_path.replace(".npy", "_PL.npy")
-        elif input_type != "FDK":
+            # Add "PL_" to the start of the file name
+            sub_path = f"PL_{sub_path}"
+        elif input_type == "FDK":
+            # Add "FDK_" to the start of the file name
+            sub_path = f"FDK_{sub_path}"
+        else:
             raise ValueError(
                 f"Input type {input_type} is not supported. Supported input types are: FDK, PL."
             )

@@ -45,34 +45,48 @@ def init_loss(config: dict):
     return loss
 
 
-def init_optimizer(learning_rate, config: dict, model):
+def init_optimizer(config: dict, model):
+    if isinstance(config["learning_rate"], float):
+        # If learning rate is a float, convert it to a list
+        learning_rates = [config["learning_rate"]] * config["epochs"]
+    else:
+        learning_rates = config["learning_rate"]
+
     if config["optimizer"] == "SGD":
         logger.debug(
-            f"Optimizer: SGD with learning rate {learning_rate}, momentum {config['momentum_SGD']}, weight decay {config['weight_decay_SGD']}"
+            f"Optimizer: SGD with learning rate {learning_rates[0]}, momentum {config['momentum_SGD']}, weight decay {config['weight_decay_SGD']}"
         )
-        return SGD(
+        optimizer = SGD(
             model.parameters(),
-            lr=learning_rate,
+            lr=learning_rates[0],
             momentum=config["momentum_SGD"],
             weight_decay=config["weight_decay_SGD"],
         )
     elif config["optimizer"] == "Adam":
-        logger.debug(f"Optimizer: Adam with learning rate {learning_rate}")
-        return Adam(model.parameters(), lr=learning_rate)
+        logger.debug(f"Optimizer: Adam with learning rate {learning_rates[0]}")
+        optimizer = Adam(model.parameters(), lr=learning_rates[0])
     elif config["optimizer"] == "NAdam":
         logger.debug(
-            f"Optimizer: NAdam with learning rate {learning_rate}, betas {config['betas_NAdam']}, momentum_decay {config['momentum_decay_NAdam']}"
+            f"Optimizer: NAdam with learning rate {learning_rates[0]}, betas {config['betas_NAdam']}, momentum_decay {config['momentum_decay_NAdam']}"
         )
-        return NAdam(
+        optimizer = NAdam(
             model.parameters(),
-            lr=learning_rate,
+            lr=learning_rates[0],
             betas=config["betas_NAdam"],
             momentum_decay=config["momentum_decay_NAdam"],
         )
-
-    raise NotImplementedError(
-        f"Optimizer {config['optimizer']} is not implemented. Supported optimizers are: SGD, Adam, NAdam."
+    else:
+        raise NotImplementedError(
+            f"Optimizer {config['optimizer']} is not implemented. Supported optimizers are: SGD, Adam, NAdam."
+        )
+    
+    # Initialize the learning rate scheduler
+    scheduler = torch.optim.lr_scheduler.LambdaLR(
+        optimizer,
+        lr_lambda=lambda epoch: learning_rates[min(epoch, len(learning_rates) - 1)] / learning_rates[0]
     )
+
+    return optimizer, scheduler
 
 
 def init_tensorboard_writers(config: dict, time_str):
@@ -233,6 +247,10 @@ class TrainingApp:
                 self.config, self.time_str
             )
 
+
+        # Initialize the optimizer and learning rate scheduler
+        self.optimizer, self.scheduler = init_optimizer(self.config, self.model)
+
         # Summarize training settings
         logger.info("TRAINING SETTINGS:")
         logger.info(self.config)
@@ -248,21 +266,15 @@ class TrainingApp:
         logger.info("STARTING TRAINING...")
         # NOTE: epoch_ndx is 1-indexed!!
         for epoch_ndx in range(1, self.config["epochs"] + 1):
+            # Update the learning rate
+            self.scheduler.step()
+            logger.debug(
+                f"Learning rate updated to {self.scheduler.get_last_lr()[0]} at epoch {epoch_ndx}."
+            )
+
             # Set the model to training mode
             self.model.train()
             logger.debug("Model set to training mode for training.")
-
-            if isinstance(self.config["learning_rate"], float):
-                # If learning rate is a float, use it directly
-                learning_rate = self.config["learning_rate"]
-            else:
-                # Otherwise, use the learning rate schedule
-                learning_rate = self.config["learning_rate"][
-                    min(epoch_ndx - 1, len(self.config["learning_rate"]) - 1)
-                ]
-
-            # Initialize the optimizer with the current learning rate
-            self.optimizer = init_optimizer(learning_rate, self.config, self.model)
 
             # Monitor training loss
             epoch_total_train_loss = 0.0
@@ -399,10 +411,6 @@ class TrainingApp:
                             )
                         )
         
-            # Delte optimizer after each epoch
-            del self.optimizer
-            gc.collect()
-
         logger.info(
             "Training finished, took {:.2f}s\n".format(
                 time.time() - training_start_time
@@ -456,6 +464,7 @@ class TrainingApp:
             if self.config["tensor_board"]:
                 del self.trn_writer, self.val_writer
             del self.config
+            del self.optimizer, self.scheduler
             del self.criterion
             del train_inputs, train_truths
             del val_inputs, val_truths

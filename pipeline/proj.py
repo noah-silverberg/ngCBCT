@@ -2,19 +2,17 @@ import numpy as np
 import torch
 import mat73
 import torch.nn as nn
+from pipeline.paths import Files
 
 
 def load_projection_mat(
-    patient: str, scan: str, scan_type: str, nsg_cbct_path: str, exclude_prj=False
+    mat_path, exclude_prj=False
 ):
     """
     Load projection data from a .mat file.
 
     Args:
-        patient (str): Patient identifier (e.g., '13'), scalar string.
-        scan (str): Scan identifier (e.g., '01'), scalar string.
-        scan_type (str): Type of scan (e.g., 'HF'), scalar string.
-        nsg_cbct_path (str): Path to the nonstop-gated CBCT project path.
+        mat_path (str): Path to the .mat file.
         exclude_prj (bool): If True, only load odd_index and angles, not prj.
 
     Returns:
@@ -23,14 +21,13 @@ def load_projection_mat(
         prj (torch.Tensor): shape (W, H, A), gated projection data.
     """
     # Load projection mat file for a given scan
-    mat_path = f"{nsg_cbct_path}/data/prj/{scan_type}/mat/p{patient}.{scan_type}{scan}.{scan_type}.mat"
     if exclude_prj:
         mat = mat73.loadmat(mat_path, only_include=["odd_index", "angles"])
     else:
         mat = mat73.loadmat(mat_path)
 
     odd_index = np.array(mat["odd_index"])  # angle indices to keep for nonstop gated
-    angles = torch.from_numpy(np.array(mat["angles"])).float()  # angles acquired
+    angles = torch.from_numpy(np.array(mat["angles"]).flatten()).float()  # angles acquired
     if exclude_prj:
         return odd_index, angles
 

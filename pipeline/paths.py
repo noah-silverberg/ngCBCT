@@ -1,6 +1,9 @@
 import os
 from dataclasses import dataclass
 from pipeline.utils import ensure_dir
+import logging
+
+logger = logging.getLogger("ngCBCT")
 
 
 @dataclass
@@ -53,6 +56,8 @@ class Directories:
                 
                 # Create any directories that do not exist
                 ensure_dir(dir_path)
+
+        logger.debug(f"Directories initialized and verified:\n{self}")
 
     def __str__(self):
         # Print the dataclass fields and their values in a readable format
@@ -164,7 +169,7 @@ class Files:
         Returns:
             str: Filename for the projection `.mat` file.
         """
-        return f"p{patient}.{scan_type}{scan}.{scan_type}.mat"
+        return f"p{patient}.{scan_type}{scan}.{scan_type}.mat" # e.g., p01.HF01.HF.mat
     
     def get_projection_mat_filepath(self, patient, scan, scan_type):
         """
@@ -182,7 +187,7 @@ class Files:
         return os.path.join(self.directories.mat_projections_dir, filename)
 
     @staticmethod
-    def _get_projection_pt_filename(patient, scan, scan_type):
+    def _get_projection_pt_filename(patient, scan, scan_type, gated):
         """
         Get the filename for the projection `.pt` file based on patient, scan, and scan type.
 
@@ -190,12 +195,14 @@ class Files:
             patient (str): Patient identifier, e.g. '01'.
             scan (str): Scan identifier, e.g. '01'.
             scan_type (str): Type of scan, e.g. 'HF', 'FF'.
+            gated (bool): Whether the data is gated or nonstop-gated.
         Returns:
             str: Filename for the projection `.pt` file.
         """
-        return f"{scan_type}_p{patient}_{scan}.pt"
-    
-    def get_projection_pt_filepath(self, patient, scan, scan_type):
+        gated_str = "gated" if gated else "ng"
+        return f"{gated_str}_{scan_type}_p{patient}_{scan}.pt" # e.g., gated_HF_p01_01.pt
+
+    def get_projection_pt_filepath(self, patient, scan, scan_type, gated):
         """
         Get the absolute file path for the projection `.pt` file.
 
@@ -203,10 +210,11 @@ class Files:
             patient (str): Patient identifier, e.g. '01'.
             scan (str): Scan identifier, e.g. '01'.
             scan_type (str): Type of scan, e.g. 'HF', 'FF'.
+            gated (bool): Whether the data is gated or nonstop-gated.
         Returns:
             str: Absolute file path for the projection `.pt` file.
         """
-        filename = self._get_projection_pt_filename(patient, scan, scan_type)
+        filename = self._get_projection_pt_filename(patient, scan, scan_type, gated)
         return os.path.join(self.directories.pt_projections_dir, filename)
     
     @staticmethod
@@ -223,7 +231,7 @@ class Files:
         """
         gated_str = "gated" if gated else "ng"
         split = split.lower()
-        return f"{gated_str}_{split}.npy"
+        return f"{gated_str}_{split}.npy" # e.g., gated_train.npy
     
     def get_projections_aggregate_filepath(self, split, gated):
         """
@@ -252,9 +260,9 @@ class Files:
             str: Filename for the trained PD model file.
         """
         if checkpoint:
-            return f"epoch-{checkpoint:02d}.pth"
+            return f"epoch-{checkpoint:02d}.pth" # e.g., epoch-05.pth
 
-        return f"{model_version}.pth"
+        return f"{model_version}.pth" # e.g., v1.pth
 
     def get_projections_model_filepath(self, model_version, checkpoint=None, ensure_exists=True):
         """
@@ -284,7 +292,7 @@ class Files:
         Returns:
             str: Filename for the projection results `.mat` file.
         """
-        return f"p{patient}_{scan}.mat"
+        return f"p{patient}_{scan}.mat" # e.g., p01_01.mat
     
     def get_projections_results_filepath(self, model_version, patient, scan, ensure_exists=True):
         """
@@ -315,7 +323,7 @@ class Files:
         Returns:
             str: Filename for the FDK reconstruction `.pt` file.
         """
-        return f"p{patient}_{scan}.pt"
+        return f"p{patient}_{scan}.pt" # e.g., p01_01.pt
 
     def get_recon_filepath(self, model_version, patient, scan, ensure_exists=True):
         """
@@ -348,7 +356,7 @@ class Files:
         """
         gated_str = "gated" if gated else "ng"
         split = split.lower()
-        return f"{gated_str}_{split}.npy"
+        return f"{gated_str}_{split}.npy" # e.g., gated_train.npy
 
     def get_images_aggregate_filepath(self, model_version, split, gated, ensure_exists=True):
         """
@@ -383,8 +391,8 @@ class Files:
         Returns:
             str: Filename for the trained ID model file.
         """
-        if checkpoint is not None:
-            return f"{model_version}_checkpoint-{checkpoint:02d}.pth"
+        if checkpoint:
+            return f"epoch-{checkpoint:02d}.pth" # e.g., epoch-05.pth
         
         return f"{model_version}.pth"
 
@@ -416,7 +424,7 @@ class Files:
         Returns:
             str: Filename for the image results `.pt` file.
         """
-        return f"p{patient}_{scan}.pt"
+        return f"p{patient}_{scan}.pt" # e.g., p01_01.pt
     
     def get_images_results_filepath(self, model_version, patient, scan, ensure_exists=True):
         """

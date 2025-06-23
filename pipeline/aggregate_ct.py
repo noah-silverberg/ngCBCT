@@ -25,7 +25,6 @@ def aggregate_saved_recons(paths: list[str], augment: bool):
     for i, path in tqdm(enumerate(paths), desc="Aggregating reconstructions"):
         recon = torch.load(path).detach().float()
         recon = normalizeInputsClip(recon)
-        recon = recon.permute(2, 0, 1)
         recon = torch.unsqueeze(recon, 1)
 
         if i == 0:

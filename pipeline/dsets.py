@@ -26,10 +26,10 @@ def normalizeInputsClip(input_images):
     # remove the first and last 20 slices
     c_max = 180
     c_min = 20
-    input_images = input_images[:, :, c_min:c_max]
+    input_images = torch.transpose(input_images[c_min:c_max, :, :], 1, 2)
 
     # clip input images to [0, 0.04]
-    input_images.clip(0, 0.04, input_images)
+    input_images.clip_(0, 0.04)
 
     # normalize input to [0, 1]
     input_images *= 25.0

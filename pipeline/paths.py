@@ -448,6 +448,8 @@ class Files:
             If using a reconstructions not from a PD model (e.g., FDK or PL),
             you can just pass that identifier instead (e.g., 'fdk' or 'pl').
         """
+        if gated and model_version != "fdk":
+            raise ValueError("Gated images should be called with model_version='fdk'.")
         filename = self._get_images_aggregate_filename(split, gated)
         dir_ = self.directories.get_images_aggregate_dir(model_version, ensure_exists)
         return os.path.join(dir_, filename)

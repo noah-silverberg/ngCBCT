@@ -107,44 +107,15 @@ def init_tensorboard_writers(config: dict, time_str):
     return trn_writer, val_writer
 
 
-def get_data_sub_path(
-    config: dict,
-    sample,
-    truth,
-):
-    """Get the sub-path for the data based on the data type."""
-    domain = config["domain"]
-    scan_type = config["scan_type"]
-    input_type = config["input_type"]
-
-    # We need to know the input type to get the right data
-    sub_path = f"{domain}_{'gated' if truth else 'ng'}_{scan_type}_{sample}.npy"
-
-    # If the input is PL we just add "_PL" to the end of the file name
-    if domain == "IMAG":
-        if input_type == "PL":
-            # Add "PL_" to the start of the file name
-            sub_path = f"PL_{sub_path}"
-        elif input_type == "FDK":
-            # Add "FDK_" to the start of the file name
-            sub_path = f"FDK_{sub_path}"
-        else:
-            raise ValueError(
-                f"Input type {input_type} is not supported. Supported input types are: FDK, PL."
-            )
-
-    return sub_path
-
-
-def init_dataloader(config: dict, files: Files, sample: str, model_version: str, domain: str):
+def init_dataloader(config: dict, files: Files, sample: str, input_type: str, domain: str):
     """Initialize the DataLoader for a specific sample ('TRAIN', 'VALIDATION', or 'TEST')."""
     # Get the paths to the training data
     if domain == "PROJ":
         images_path = files.get_projections_aggregate_filepath(sample, gated=False)
         truth_images_path = files.get_projections_aggregate_filepath(sample, gated=True)
     else:
-        images_path = files.get_images_aggregate_filepath(model_version, sample, gated=False)
-        truth_images_path = files.get_images_aggregate_filepath(model_version, sample, gated=True)
+        images_path = files.get_images_aggregate_filepath(input_type, sample, gated=False)
+        truth_images_path = files.get_images_aggregate_filepath(input_type, sample, gated=True)
     
     logger.debug(f"{sample} images path: {images_path}")
     logger.debug(f"{sample} ground truth images path: {truth_images_path}")
@@ -270,8 +241,8 @@ class TrainingApp:
         logger.debug("Starting {}, {}".format(type(self).__name__, self.config))
 
         # Get the dataloaders for training and validation
-        train_dl = init_dataloader(self.config, self.files, "TRAIN", self.config["model_version"], self.config['domain'])
-        val_dl = init_dataloader(self.config, self.files, "VALIDATION", self.config["model_version"], self.config['domain'])
+        train_dl = init_dataloader(self.config, self.files, "TRAIN", self.config["input_type"], self.config['domain'])
+        val_dl = init_dataloader(self.config, self.files, "VALIDATION", self.config["input_type"], self.config['domain'])
 
         # Initialize the tensorboard writers if enabled
         if self.config["tensor_board"]:

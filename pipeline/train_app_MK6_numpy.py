@@ -136,10 +136,10 @@ def get_data_sub_path(
     return sub_path
 
 
-def init_dataloader(config: dict, files: Files, sample: str, model_version: str = None):
+def init_dataloader(config: dict, files: Files, sample: str, model_version: str, domain: str):
     """Initialize the DataLoader for a specific sample ('TRAIN', 'VALIDATION', or 'TEST')."""
     # Get the paths to the training data
-    if model_version is None:
+    if domain == "PROJ":
         images_path = files.get_projections_aggregate_filepath(sample, gated=False)
         truth_images_path = files.get_projections_aggregate_filepath(sample, gated=True)
     else:
@@ -178,7 +178,16 @@ def init_dataloader(config: dict, files: Files, sample: str, model_version: str 
 #      and just make them attributes of the training app
 # TODO this code should also just generally be cleaned up a bit
 class TrainingApp:
-    def __init__(self, config: dict, domain: str, DEBUG: bool, files: Files):
+    def __init__(
+        self,
+        config: dict,
+        domain: str,
+        DEBUG: bool,
+        files: Files,
+        checkpoint_epoch: int = None,
+        optimizer_state: dict = None,
+        network_state: dict = None,
+    ):
         if domain == "PROJ":
             self.config = config["PD_settings"]
         elif domain == "IMAG":
@@ -229,11 +238,30 @@ class TrainingApp:
         # Initialize model, loss, and optimizer
         self.model = init_model(self.config)
         self.criterion = init_loss(self.config)
+        self.optimizer, self.scheduler = init_optimizer(self.config, self.model)
+
+        # Resume from checkpoint if provided
+        self.start_epoch = 1
+        if (
+            checkpoint_epoch is not None
+            and optimizer_state is not None
+            and network_state is not None
+        ):
+            self._load_checkpoint(checkpoint_epoch, optimizer_state, network_state)
+
+    def _load_checkpoint(
+        self, checkpoint_epoch: int, optimizer_state: dict, network_state: dict
+    ):
+        """Load model, optimizer, and scheduler states from provided checkpoint data."""
+        self.model.load_state_dict(network_state)
+        self.optimizer.load_state_dict(optimizer_state)
+        self.start_epoch = checkpoint_epoch + 1  # Resume from the next epoch
+        logger.info(f"Resumed training from checkpoint: Epoch {checkpoint_epoch}")
 
     def main(self):
         # Make sure we're not accidentally overwriting an existing model version
         save_dir = self.files.directories.get_model_dir(self.config["model_version"], self.config["domain"], ensure_exists=False)
-        if os.path.exists(save_dir):
+        if os.path.exists(save_dir) and self.start_epoch == 1:
             logger.error(
                 f"Save directory {save_dir} already exists. Please choose a different model version or delete the existing directory, or manually delete this."
             )
@@ -242,17 +270,14 @@ class TrainingApp:
         logger.debug("Starting {}, {}".format(type(self).__name__, self.config))
 
         # Get the dataloaders for training and validation
-        train_dl = init_dataloader(self.config, self.files, "TRAIN", self.config["model_version"])
-        val_dl = init_dataloader(self.config, self.files, "VALIDATION", self.config["model_version"])
+        train_dl = init_dataloader(self.config, self.files, "TRAIN", self.config["model_version"], self.config['domain'])
+        val_dl = init_dataloader(self.config, self.files, "VALIDATION", self.config["model_version"], self.config['domain'])
 
         # Initialize the tensorboard writers if enabled
         if self.config["tensor_board"]:
             self.trn_writer, self.val_writer = init_tensorboard_writers(
                 self.config, self.time_str
             )
-
-        # Initialize the optimizer and learning rate scheduler
-        self.optimizer, self.scheduler = init_optimizer(self.config, self.model)
 
         # Summarize training settings
         logger.info("TRAINING SETTINGS:")
@@ -268,7 +293,7 @@ class TrainingApp:
         # Train for the chosen number of epochs
         logger.info("STARTING TRAINING...")
         # NOTE: epoch_ndx is 1-indexed!!
-        for epoch_ndx in range(1, self.config["epochs"] + 1):
+        for epoch_ndx in range(self.start_epoch, self.config["epochs"] + 1):
             logger.debug(
                 f"Learning rate is {self.scheduler.get_last_lr()[0]} at epoch {epoch_ndx}."
             )

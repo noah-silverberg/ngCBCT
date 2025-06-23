@@ -3,6 +3,9 @@ import numpy as np
 import torch
 from .proj import load_projection_mat
 from . import network_instance
+import logging
+
+logger = logging.getLogger("pipeline")
 
 
 def load_model(
@@ -33,7 +36,7 @@ def apply_model_to_projections(
 ):
     """Apply CNN model slice-wise to nonstop-gated projections to predict missing projections and combine."""
     # Get the acquired nonstop-gated indices and angles from the .mat file
-    # NOTE: excluding prj speeds it up a bit
+    # NOTE: excluding prj speeds it speeds up a bit
     odd_index, angles = load_projection_mat(
         mat_path, exclude_prj=True
     )
@@ -61,43 +64,48 @@ def apply_model_to_projections(
     v_dim = 512 if scan_type == "HF" else 256
     overlap = v_dim * 2 - num_angles
 
-    # Loop over the outputted slices, put the results in the output tensor
-    for i in range(382):
-        # Get the slices from the first and second halves, and pass them through the model
-        in_ = prj_ngcbct_li[[i, i + 382]].detach().to(device)
+    # Loop over the outputted slices in batches of 4 indices (8 slices total), put the results in the output tensor
+    for i in range(0, 382, 4):
+        # Adjust the batch size for the last batch to avoid going out of bounds
+        batch_size = min(4, 382 - i)
+        indices = [i + j for j in range(batch_size)] + [i + j + 382 for j in range(batch_size)]
+        in_ = prj_ngcbct_li[indices].detach().to(device)
         with torch.no_grad():
             out = model(in_).cpu()
 
-        # If there is overlap between the two halves, average the overlapping region
-        if overlap >= 0:
-            # Put the non-overlapping parts of the first half
-            prj_ngcbct_cnn[0 : (v_dim - overlap), i, :] = out[
-                0, 0, 0 : (v_dim - overlap), 1:511
-            ]
+        for j in range(batch_size):
+            idx = i + j
 
-            # Put the non-overlapping parts of the second half
-            prj_ngcbct_cnn[v_dim:, i, :] = out[1, 0, overlap:, 1:511]
+            # If there is overlap between the two halves, average the overlapping region
+            if overlap >= 0:
+                # Put the non-overlapping parts of the first half
+                prj_ngcbct_cnn[0 : (v_dim - overlap), idx, :] = out[
+                    j, 0, 0 : (v_dim - overlap), 1:511
+                ]
 
-            # Average the overlapping parts
-            prj_ngcbct_cnn[(v_dim - overlap) : v_dim, i, :] = (
-                out[0, 0, (v_dim - overlap) : v_dim, 1:511]
-                + out[1, 0, 0:overlap, 1:511]
-            ) / 2.0
+                # Put the non-overlapping parts of the second half
+                prj_ngcbct_cnn[v_dim:, idx, :] = out[j + batch_size, 0, overlap:, 1:511]
 
-        # If there is no overlap, put the first half at the top
-        # and the second at the bottom
-        # and linearly interpolate the missing gap
-        else:
-            # Fill the top and bottom parts of the projection
-            prj_ngcbct_cnn[0:v_dim, i, :] = out[0, 0, :, 1:511]
-            prj_ngcbct_cnn[(v_dim - overlap) :, i, :] = out[1, 0, :, 1:511]
+                # Average the overlapping parts
+                prj_ngcbct_cnn[(v_dim - overlap) : v_dim, idx, :] = (
+                    out[j, 0, (v_dim - overlap) : v_dim, 1:511]
+                    + out[j + batch_size, 0, 0:overlap, 1:511]
+                ) / 2.0
 
-            # Calculate the linear interpolation for the gap
-            diff = (out[1, 0, 0, 1:511] - out[0, 0, -1, 1:511]) / (
-                -overlap
-            )  # note: overlap < 0 here
-            for j in range(-overlap):
-                prj_ngcbct_cnn[v_dim + j, i, :] = out[0, 0, -1, 1:511] + (j + 1) * diff
+            # If there is no overlap, put the first half at the top
+            # and the second at the bottom
+            # and linearly interpolate the missing gap
+            else:
+                # Fill the top and bottom parts of the projection
+                prj_ngcbct_cnn[0:v_dim, idx, :] = out[j, 0, :, 1:511]
+                prj_ngcbct_cnn[(v_dim - overlap) :, idx, :] = out[j + batch_size, 0, :, 1:511]
+
+                # Calculate the linear interpolation for the gap
+                diff = (out[j + batch_size, 0, 0, 1:511] - out[j, 0, -1, 1:511]) / (
+                    -overlap
+                )  # note: overlap < 0 here
+                for k in range(-overlap):
+                    prj_ngcbct_cnn[v_dim + k, idx, :] = out[j, 0, -1, 1:511] + (k + 1) * diff
 
     # Now we need to:
     # 1. Create a ground truth tensor with the gated projections
@@ -129,4 +137,5 @@ def apply_model_to_projections(
         "prj": prj_ngcbct_cnn.cpu().numpy(),
     }
 
+    return g_mat, cnn_mat
     return g_mat, cnn_mat

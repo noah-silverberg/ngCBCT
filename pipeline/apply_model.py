@@ -138,4 +138,31 @@ def apply_model_to_projections(
     }
 
     return g_mat, cnn_mat
-    return g_mat, cnn_mat
+
+def apply_model_to_recons(
+    model: torch.nn.Module,
+    pt_path: str,
+    device: torch.device,
+    train_at_inference: bool = False, # for MC dropout
+):
+    """Apply CNN model slice-wise to nonstop-gated reconstructions to clean up image domain artifacts."""
+    # Load the nonstop-gated reconstruction
+    # NOTE: These each have shape (160, 1, 512, 512) for HF and shape (160, 1, 256, 256) for FF
+    recon = torch.load(pt_path).detach().to(device)
+
+    if train_at_inference:
+        # Set the model to train mode for MC dropout
+        model.train()
+    else:
+        # Set the model to eval mode for inference
+        model.eval()
+
+    # Loop over the outputted slices in batches of 8
+    for i in range(0, recon.shape[0], 8):
+        # Adjust the batch size for the last batch to avoid going out of bounds
+        batch_size = min(8, recon.shape[0] - i)
+        indices = [i + j for j in range(batch_size)]
+        with torch.no_grad():
+            recon[indices] = model(recon[indices]) # replace the slices in place
+
+    return recon

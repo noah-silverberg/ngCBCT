@@ -27,7 +27,7 @@ def aggregate_saved_recons(scan_type: str, sample: str, recon_pt_dir: str, AGG_S
     # Concatenate all scans into one tensor
     # along the 1st dim (scan dimension)
     for i, (patient, scan, scan_type) in tqdm(enumerate(scans), desc="Aggregating reconstructions"):
-        recon = torch.load(os.path.join(recon_pt_dir, f'FDK_{'gated' if truth else 'ng'}_{scan_type}_p{patient}_{scan}.pt')).detach().float()
+        recon = torch.load(os.path.join(recon_pt_dir, f"FDK_{'gated' if truth else 'ng'}_{scan_type}_p{patient}_{scan}.pt")).detach().float()
         recon = normalizeInputsClip(recon)
         recon = recon.permute(2, 0, 1)
         recon = torch.unsqueeze(recon, 1)

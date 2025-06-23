@@ -115,7 +115,7 @@ def init_dataloader(config: dict, files: Files, sample: str, input_type: str, do
         truth_images_path = files.get_projections_aggregate_filepath(sample, gated=True)
     else:
         images_path = files.get_images_aggregate_filepath(input_type, sample, gated=False)
-        truth_images_path = files.get_images_aggregate_filepath(input_type, sample, gated=True)
+        truth_images_path = files.get_images_aggregate_filepath('fdk', sample, gated=True) # always use FDK for ground truth
     
     logger.debug(f"{sample} images path: {images_path}")
     logger.debug(f"{sample} ground truth images path: {truth_images_path}")

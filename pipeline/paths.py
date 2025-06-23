@@ -143,8 +143,8 @@ class Files:
         get_projection_pt_filepath(patient, scan, scan_type): Get the absolute file path for the projection `.pt` file.
         get_projections_aggregate_filepath(split, gated): Get the absolute file path for the aggregated projections `.npy` file.
         get_model_filepath(model_version, domain, checkpoint, ensure_exists): Get the absolute file path for the trained model file.
-        get_projections_results_filepath(model_version, patient, scan, gated, ensure_exists): Get the absolute file path for the projection results `.mat` file.
-        get_recon_filepath(model_version, patient, scan, gated, ensure_exists): Get the absolute file path for the FDK reconstruction `.pt` file.
+        get_projections_results_filepath(model_version, patient, scan, scan_type, gated, ensure_exists): Get the absolute file path for the projection results `.mat` file.
+        get_recon_filepath(model_version, patient, scan, scan_type, gated, ensure_exists): Get the absolute file path for the FDK reconstruction `.pt` file.
         get_images_aggregate_filepath(model_version, split, gated, ensure_exists): Get the absolute file path for the aggregated images `.npy` file.
         get_images_results_filepath(model_version, patient, scan, ensure_exists): Get the absolute file path for the image results `.pt` file.
     """
@@ -330,20 +330,25 @@ class Files:
         return os.path.join(dir_, filename)
 
     @staticmethod
-    def _get_projections_results_filename(patient, scan):
+    def _get_projections_results_filename(patient, scan, gated, scan_type):
         """
         Get the filename for the projection results `.mat` file based on patient and scan.
 
         Args:
             patient (str): Patient identifier, e.g. '01'.
             scan (str): Scan identifier, e.g. '01'.
+            gated (bool): Whether the projections are gated or not.
+            scan_type (str): Type of scan, either 'HF', 'FF'.
 
         Returns:
             str: Filename for the projection results `.mat` file.
         """
+        if gated:
+            return f"{scan_type}_p{patient}_{scan}.mat" # e.g., p01_01.mat
+        
         return f"p{patient}_{scan}.mat" # e.g., p01_01.mat
 
-    def get_projections_results_filepath(self, model_version, patient, scan, gated, ensure_exists=True):
+    def get_projections_results_filepath(self, model_version, patient, scan, scan_type, gated, ensure_exists=True):
         """
         Get the absolute file path for the projection results `.mat` file.
 
@@ -351,13 +356,14 @@ class Files:
             model_version (str): Model version identifier, e.g. 'v1', 'v2'.
             patient (str): Patient identifier, e.g. '01'.
             scan (str): Scan identifier, e.g. '01'.
+            scan_type (str): Type of scan, either 'HF', 'FF'.
             gated (bool): Whether the projections are gated or not.
             ensure_exists (bool, optional): Whether to ensure the directory exists.
 
         Returns:
             str: Absolute file path for the projection results `.mat` file.
         """
-        filename = self._get_projections_results_filename(patient, scan)
+        filename = self._get_projections_results_filename(patient, scan, gated, scan_type)
         
         if gated:
             dir_ = self.directories.projections_gated_dir
@@ -367,20 +373,25 @@ class Files:
         return os.path.join(dir_, filename)
     
     @staticmethod
-    def _get_recon_filename(patient, scan):
+    def _get_recon_filename(patient, scan, gated, scan_type):
         """
         Get the filename for the FDK reconstruction `.pt` file based on patient and scan.
 
         Args:
             patient (str): Patient identifier, e.g. '01'.
             scan (str): Scan identifier, e.g. '01'.
+            gated (bool): Whether the reconstruction is gated or not.
+            scan_type (str): Type of scan, either 'HF', 'FF'.
 
         Returns:
             str: Filename for the FDK reconstruction `.pt` file.
         """
+        if gated:
+            return f"{scan_type}_p{patient}_{scan}_gated.pt"
+        
         return f"p{patient}_{scan}.pt" # e.g., p01_01.pt
 
-    def get_recon_filepath(self, model_version, patient, scan, gated, ensure_exists=True):
+    def get_recon_filepath(self, model_version, patient, scan, scan_type, gated, ensure_exists=True):
         """
         Get the absolute file path for the FDK reconstruction `.pt` file.
 
@@ -388,13 +399,14 @@ class Files:
             model_version (str): Model version identifier, e.g. 'v1', 'v2'.
             patient (str): Patient identifier, e.g. '01'.
             scan (str): Scan identifier, e.g. '01'.
+            scan_type (str): Type of scan, either 'HF', 'FF'.
             gated (bool): Whether the reconstruction is gated or not.
             ensure_exists (bool, optional): Whether to ensure the directory exists.
 
         Returns:
             str: Absolute file path for the FDK reconstruction `.pt` file.
         """
-        filename = self._get_recon_filename(patient, scan)
+        filename = self._get_recon_filename(patient, scan, gated, scan_type)
 
         if gated:
             dir_ = self.directories.reconstructions_gated_dir

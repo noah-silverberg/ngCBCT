@@ -17,7 +17,9 @@ class Directories:
         projections_aggregate_dir (str): Absolute path to the directory containing aggregated PD data files.
         projections_model_dir (str): Absolute path to the directory containing PD model files.
         projections_results_dir (str): Absolute path to the directory containing PD results files.
+        projections_gated_dir (str): Absolute path to the directory containing gated PD data files.
         reconstructions_dir (str): Absolute path to the directory containing FDK reconstruction files.
+        reconstructions_gated_dir (str): Absolute path to the directory containing gated FDK reconstruction files.
         images_aggregate_dir (str): Absolute path to the directory containing aggregated ID data files.
         images_model_dir (str): Absolute path to the directory containing ID model files.
         images_results_dir (str): Absolute path to the directory containing ID results files.
@@ -27,7 +29,7 @@ class Directories:
         get_projections_results_dir(model_version, ensure_exists=True): Get the directory path for the projection results of a specific PD model version.
         get_reconstructions_dir(model_version, ensure_exists=True): Get the directory path for the reconstructions of a specific PD model version.
         get_images_aggregate_dir(model_version, ensure_exists=True): Get the directory path for the aggregated images of a specific PD model version (after FDK).
-        get_images_results_dir(model_version, ensure_exists=True): Get the directory path for the image
+        get_images_results_dir(model_version, ensure_exists=True): Get the directory path for the images results of a specific PD model version (after FDK).
 
     Note:
         All paths must be absolute paths.
@@ -40,7 +42,9 @@ class Directories:
     projections_aggregate_dir: str = None
     projections_model_dir: str = None
     projections_results_dir: str = None
+    projections_gated_dir: str = None
     reconstructions_dir: str = None
+    reconstructions_gated_dir: str = None
     images_aggregate_dir: str = None
     images_model_dir: str = None
     images_results_dir: str = None
@@ -326,20 +330,18 @@ class Files:
         return os.path.join(dir_, filename)
 
     @staticmethod
-    def _get_projections_results_filename(patient, scan, gated):
+    def _get_projections_results_filename(patient, scan):
         """
         Get the filename for the projection results `.mat` file based on patient and scan.
 
         Args:
             patient (str): Patient identifier, e.g. '01'.
             scan (str): Scan identifier, e.g. '01'.
-            gated (bool): Whether the projections are gated or not.
 
         Returns:
             str: Filename for the projection results `.mat` file.
         """
-        gated_str = "gated" if gated else "ng"
-        return f"{gated_str}_p{patient}_{scan}.mat" # e.g., gated_p01_01.mat
+        return f"p{patient}_{scan}.mat" # e.g., p01_01.mat
 
     def get_projections_results_filepath(self, model_version, patient, scan, gated, ensure_exists=True):
         """
@@ -355,25 +357,28 @@ class Files:
         Returns:
             str: Absolute file path for the projection results `.mat` file.
         """
-        filename = self._get_projections_results_filename(patient, scan, gated)
-        dir_ = self.directories.get_projections_results_dir(model_version, ensure_exists)
+        filename = self._get_projections_results_filename(patient, scan)
+        
+        if gated:
+            dir_ = self.directories.projections_gated_dir
+        else:
+            dir_ = self.directories.get_projections_results_dir(model_version, ensure_exists)
+        
         return os.path.join(dir_, filename)
     
     @staticmethod
-    def _get_recon_filename(patient, scan, gated):
+    def _get_recon_filename(patient, scan):
         """
         Get the filename for the FDK reconstruction `.pt` file based on patient and scan.
 
         Args:
             patient (str): Patient identifier, e.g. '01'.
             scan (str): Scan identifier, e.g. '01'.
-            gated (bool): Whether the reconstruction is gated or not.
 
         Returns:
             str: Filename for the FDK reconstruction `.pt` file.
         """
-        gated_str = "gated" if gated else "ng"
-        return f"{gated_str}_p{patient}_{scan}.pt" # e.g., gated_p01_01.pt
+        return f"p{patient}_{scan}.pt" # e.g., p01_01.pt
 
     def get_recon_filepath(self, model_version, patient, scan, gated, ensure_exists=True):
         """
@@ -389,8 +394,13 @@ class Files:
         Returns:
             str: Absolute file path for the FDK reconstruction `.pt` file.
         """
-        filename = self._get_recon_filename(patient, scan, gated)
-        dir_ = self.directories.get_reconstructions_dir(model_version, ensure_exists)
+        filename = self._get_recon_filename(patient, scan)
+
+        if gated:
+            dir_ = self.directories.reconstructions_gated_dir
+        else:
+            dir_ = self.directories.get_reconstructions_dir(model_version, ensure_exists)
+
         return os.path.join(dir_, filename)
     
     @staticmethod

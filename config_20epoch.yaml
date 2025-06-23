@@ -21,7 +21,7 @@ PD_settings:
   tensor_board: false  # Whether to use TensorBoard for PD training
   tensor_board_comment: ""  # If using TensorBoard, a comment suffix
   train_during_inference: false  # Whether to put the model in training mode during inference (e.g., for MC dropout)
-  ensemble_size: 3 # Number of models to train
+  ensemble_size: 6 # Number of models to train
   scan_type: "HF" # Scan type for PD training (HF or FF) -- make sure it matches the aggregated data
 
   # Ignore -- not used for PD training (just have to be defined)
@@ -34,7 +34,7 @@ ID_settings:
   epochs: 50
   learning_rate: 1e-3
   network_name: "IResNet"
-  model_version: "MK6"
+  model_version: "MK7"
   batch_size: 8
   optimizer: "NAdam"
   num_workers: 0
@@ -51,4 +51,5 @@ ID_settings:
   train_during_inference: false
   ensemble_size: 1
   scan_type: "HF"
-  input_type: "FDK" # Input type for ID training (FDK or PL)
+  input_type: "MK7" # Input type for ID training, i.e., PL or some trained & reconstructed PD model name
+  input_type_match_ensemble: true # When training an ensemble, whether the input type should have an extra identifier (e.g., _01) which matches the ID model name

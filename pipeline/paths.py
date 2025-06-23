@@ -23,11 +23,10 @@ class Directories:
         images_results_dir (str): Absolute path to the directory containing ID results files.
 
     Methods:
-        get_projections_model_dir(model_version, ensure_exists=True): Get the directory path for the PD model of a specific version.
+        get_model_dir(model_version, domain, ensure_exists=True): Get the directory path for the model of a specific version.
         get_projections_results_dir(model_version, ensure_exists=True): Get the directory path for the projection results of a specific PD model version.
         get_reconstructions_dir(model_version, ensure_exists=True): Get the directory path for the reconstructions of a specific PD model version.
         get_images_aggregate_dir(model_version, ensure_exists=True): Get the directory path for the aggregated images of a specific PD model version (after FDK).
-        get_images_model_dir(model_version, ensure_exists=True): Get the directory path for the ID model of a specific version.
         get_images_results_dir(model_version, ensure_exists=True): Get the directory path for the image
 
     Note:
@@ -65,12 +64,15 @@ class Directories:
             f"{field}: {getattr(self, field)}" for field in self.__dataclass_fields__
         )
     
-    def get_projections_model_dir(self, model_version, ensure_exists=True):
+    def get_model_dir(self, model_version, domain, ensure_exists=True):
         """
-        Get the directory path for the PD model of a specific version.
+        Get the directory path for the model of a specific version.
         """
-        dir_path = os.path.join(self.projections_model_dir, model_version)
-        
+        if domain == "IMAG":
+            dir_path = os.path.join(self.images_model_dir, model_version)
+        else:
+            dir_path = os.path.join(self.projections_model_dir, model_version)
+
         if ensure_exists:
             ensure_dir(dir_path)
 
@@ -112,17 +114,6 @@ class Directories:
             ensure_dir(dir_path)
 
         return dir_path
-    
-    def get_images_model_dir(self, model_version, ensure_exists=True):
-        """
-        Get the directory path for the ID model of a specific version.
-        """
-        dir_path = os.path.join(self.images_model_dir, model_version)
-
-        if ensure_exists:
-            ensure_dir(dir_path)
-
-        return dir_path
 
     def get_images_results_dir(self, model_version, ensure_exists=True):
         """
@@ -147,11 +138,10 @@ class Files:
         get_projection_mat_filepath(patient, scan, scan_type): Get the absolute file path for the projection `.mat` file.
         get_projection_pt_filepath(patient, scan, scan_type): Get the absolute file path for the projection `.pt` file.
         get_projections_aggregate_filepath(split, gated): Get the absolute file path for the aggregated projections `.npy` file.
-        get_projections_model_filepath(model_version, checkpoint, ensure_exists): Get the absolute file path for the trained PD model file.
-        get_projections_results_filepath(model_version, patient, scan, ensure_exists): Get the absolute file path for the projection results `.mat` file.
-        get_recon_filepath(model_version, patient, scan, ensure_exists): Get the absolute file path for the FDK reconstruction `.pt` file.
+        get_model_filepath(model_version, domain, checkpoint, ensure_exists): Get the absolute file path for the trained model file.
+        get_projections_results_filepath(model_version, patient, scan, gated, ensure_exists): Get the absolute file path for the projection results `.mat` file.
+        get_recon_filepath(model_version, patient, scan, gated, ensure_exists): Get the absolute file path for the FDK reconstruction `.pt` file.
         get_images_aggregate_filepath(model_version, split, gated, ensure_exists): Get the absolute file path for the aggregated images `.npy` file.
-        get_images_model_filepath(model_version, checkpoint, ensure_exists): Get the absolute file path for the trained ID model file.
         get_images_results_filepath(model_version, patient, scan, ensure_exists): Get the absolute file path for the image results `.pt` file.
     """
     def __init__(self, directories: Directories):
@@ -248,53 +238,110 @@ class Files:
         return os.path.join(self.directories.projections_aggregate_dir, filename)
     
     @staticmethod
-    def _get_projections_model_filename(model_version, checkpoint=None):
+    def _get_model_filename(model_version, checkpoint=None):
         """
-        Get the filename for the trained PD model file based on model version.
+        Get the filename for the trained model file based on model version.
 
         Args:
             model_version (str): Model version identifier, e.g. 'v1', 'v2'.
             checkpoint (int, optional): If specified, indicates a checkpoint epoch number.
 
         Returns:
-            str: Filename for the trained PD model file.
+            str: Filename for the trained model file.
         """
         if checkpoint:
             return f"epoch-{checkpoint:02d}.pth" # e.g., epoch-05.pth
 
         return f"{model_version}.pth" # e.g., v1.pth
 
-    def get_projections_model_filepath(self, model_version, checkpoint=None, ensure_exists=True):
+    def get_model_filepath(self, model_version, domain, checkpoint=None, ensure_exists=True):
         """
-        Get the absolute file path for the trained PD model file.
+        Get the absolute file path for the trained model file.
 
         Args:
             model_version (str): Model version identifier, e.g. 'v1', 'v2'.
+            domain (str): Domain of the model, either 'PROJ' for projections or 'IMAG' for images.
             checkpoint (int, optional): If specified, indicates a checkpoint epoch number.
             ensure_exists (bool, optional): Whether to ensure the directory exists.
 
         Returns:
-            str: Absolute file path for the trained PD model file.
+            str: Absolute file path for the trained model file.
         """
-        filename = self._get_projections_model_filename(model_version, checkpoint)
-        dir_ = self.directories.get_projections_model_dir(model_version, ensure_exists)
+        filename = self._get_model_filename(model_version, checkpoint)
+        dir_ = self.directories.get_model_dir(model_version, domain, ensure_exists)
+        return os.path.join(dir_, filename)
+    
+
+    
+    @staticmethod
+    def _get_train_loss_filename():
+        """
+        Get the filename for the training loss `.pth` file.
+
+        Returns:
+            str: Filename for the training loss `.pth` file.
+        """
+        return "train_loss.pth"
+    
+    def get_train_loss_filepath(self, model_version, domain, ensure_exists=True):
+        """
+        Get the absolute file path for the training loss `.pth` file.
+
+        Args:
+            model_version (str): Model version identifier, e.g. 'v1', 'v2'.
+            domain (str): Domain of the model, either 'PROJ' for projections or 'IMAG' for images.
+            ensure_exists (bool, optional): Whether to ensure the directory exists.
+
+        Returns:
+            str: Absolute file path for the training loss `.pth` file.
+        """
+        filename = self._get_train_loss_filename()
+        dir_ = self.directories.get_model_dir(model_version, domain, ensure_exists)
+        return os.path.join(dir_, filename)
+    
+    @staticmethod
+    def _get_validation_loss_filename():
+        """
+        Get the filename for the validation loss `.pth` file.
+
+        Returns:
+            str: Filename for the validation loss `.pth` file.
+        """
+        return "validation_loss.pth"
+
+    def get_validation_loss_filepath(self, model_version, domain, ensure_exists=True):
+        """
+        Get the absolute file path for the validation loss `.pth` file.
+
+        Args:
+            model_version (str): Model version identifier, e.g. 'v1', 'v2'.
+            domain (str): Domain of the model, either 'PROJ' for projections or 'IMAG' for images.
+            ensure_exists (bool, optional): Whether to ensure the directory exists.
+
+        Returns:
+            str: Absolute file path for the validation loss `.pth` file.
+        """
+        filename = self._get_validation_loss_filename()
+        dir_ = self.directories.get_model_dir(model_version, domain, ensure_exists)
         return os.path.join(dir_, filename)
 
     @staticmethod
-    def _get_projections_results_filename(patient, scan):
+    def _get_projections_results_filename(patient, scan, gated):
         """
         Get the filename for the projection results `.mat` file based on patient and scan.
 
         Args:
             patient (str): Patient identifier, e.g. '01'.
             scan (str): Scan identifier, e.g. '01'.
+            gated (bool): Whether the projections are gated or not.
 
         Returns:
             str: Filename for the projection results `.mat` file.
         """
-        return f"p{patient}_{scan}.mat" # e.g., p01_01.mat
-    
-    def get_projections_results_filepath(self, model_version, patient, scan, ensure_exists=True):
+        gated_str = "gated" if gated else "ng"
+        return f"{gated_str}_p{patient}_{scan}.mat" # e.g., gated_p01_01.mat
+
+    def get_projections_results_filepath(self, model_version, patient, scan, gated, ensure_exists=True):
         """
         Get the absolute file path for the projection results `.mat` file.
 
@@ -302,30 +349,33 @@ class Files:
             model_version (str): Model version identifier, e.g. 'v1', 'v2'.
             patient (str): Patient identifier, e.g. '01'.
             scan (str): Scan identifier, e.g. '01'.
+            gated (bool): Whether the projections are gated or not.
             ensure_exists (bool, optional): Whether to ensure the directory exists.
 
         Returns:
             str: Absolute file path for the projection results `.mat` file.
         """
-        filename = self._get_projections_results_filename(patient, scan)
+        filename = self._get_projections_results_filename(patient, scan, gated)
         dir_ = self.directories.get_projections_results_dir(model_version, ensure_exists)
         return os.path.join(dir_, filename)
     
     @staticmethod
-    def _get_recon_filename(patient, scan):
+    def _get_recon_filename(patient, scan, gated):
         """
         Get the filename for the FDK reconstruction `.pt` file based on patient and scan.
 
         Args:
             patient (str): Patient identifier, e.g. '01'.
             scan (str): Scan identifier, e.g. '01'.
+            gated (bool): Whether the reconstruction is gated or not.
 
         Returns:
             str: Filename for the FDK reconstruction `.pt` file.
         """
-        return f"p{patient}_{scan}.pt" # e.g., p01_01.pt
+        gated_str = "gated" if gated else "ng"
+        return f"{gated_str}_p{patient}_{scan}.pt" # e.g., gated_p01_01.pt
 
-    def get_recon_filepath(self, model_version, patient, scan, ensure_exists=True):
+    def get_recon_filepath(self, model_version, patient, scan, gated, ensure_exists=True):
         """
         Get the absolute file path for the FDK reconstruction `.pt` file.
 
@@ -333,12 +383,13 @@ class Files:
             model_version (str): Model version identifier, e.g. 'v1', 'v2'.
             patient (str): Patient identifier, e.g. '01'.
             scan (str): Scan identifier, e.g. '01'.
+            gated (bool): Whether the reconstruction is gated or not.
             ensure_exists (bool, optional): Whether to ensure the directory exists.
 
         Returns:
             str: Absolute file path for the FDK reconstruction `.pt` file.
         """
-        filename = self._get_recon_filename(patient, scan)
+        filename = self._get_recon_filename(patient, scan, gated)
         dir_ = self.directories.get_reconstructions_dir(model_version, ensure_exists)
         return os.path.join(dir_, filename)
     
@@ -377,39 +428,6 @@ class Files:
         """
         filename = self._get_images_aggregate_filename(split, gated)
         dir_ = self.directories.get_images_aggregate_dir(model_version, ensure_exists)
-        return os.path.join(dir_, filename)
-    
-    @staticmethod
-    def _get_images_model_filename(model_version, checkpoint=None):
-        """
-        Get the filename for the trained ID model file based on model version.
-
-        Args:
-            model_version (str): Model version identifier, e.g. 'v1', 'v2'.
-            checkpoint (int, optional): If specified, indicates a checkpoint epoch number.
-
-        Returns:
-            str: Filename for the trained ID model file.
-        """
-        if checkpoint:
-            return f"epoch-{checkpoint:02d}.pth" # e.g., epoch-05.pth
-        
-        return f"{model_version}.pth"
-
-    def get_images_model_filepath(self, model_version, checkpoint=None, ensure_exists=True):
-        """
-        Get the absolute file path for the trained ID model file.
-
-        Args:
-            model_version (str): Model version identifier, e.g. 'v1', 'v2'.
-            checkpoint (int, optional): If specified, indicates a checkpoint epoch number.
-            ensure_exists (bool, optional): Whether to ensure the directory exists.
-
-        Returns:
-            str: Absolute file path for the trained ID model file.
-        """
-        filename = self._get_images_model_filename(model_version, checkpoint)
-        dir_ = self.directories.get_images_model_dir(model_version, ensure_exists)
         return os.path.join(dir_, filename)
 
     @staticmethod

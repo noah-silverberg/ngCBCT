@@ -6,19 +6,13 @@ from . import network_instance
 
 
 def load_model(
-    network_name: str, model_name: str, device, MODEL_DIR, data_version, domain, scan_type
+    network_name: str, model_path: str, device: torch.device
 ):
     # Load and instantiate the network class dynamically
     model = getattr(network_instance, network_name)()
 
     # Load the model state and send it to the GPU
-    state = torch.load(
-        os.path.join(
-            MODEL_DIR,
-            model_name,
-            f"{network_name}_{model_name}_DS{data_version}_{scan_type}_{'ID' if domain == 'IMAG' else 'PD'}.pth",
-        )
-    )
+    state = torch.load(model_path)
     model.load_state_dict(state)
     model = model.to(device)
 
@@ -30,33 +24,24 @@ def load_model(
 
 
 def apply_model_to_projections(
-    patient: str,
-    scan: str,
-    scan_type: str,
     model: torch.nn.Module,
-    g_dir,
-    ng_dir,
-    CUDA_DEVICE,
-    nsg_gated_path,
+    scan_type: str,
+    mat_path: str,
+    gated_pt_path: str,
+    ng_pt_path: str,
+    device: torch.device,
 ):
     """Apply CNN model slice-wise to nonstop-gated projections to predict missing projections and combine."""
-    # Set up CUDA
-    device = torch.device(CUDA_DEVICE)
-
     # Get the acquired nonstop-gated indices and angles from the .mat file
     # NOTE: excluding prj speeds it up a bit
     odd_index, angles = load_projection_mat(
-        patient, scan, scan_type, nsg_gated_path, exclude_prj=True
+        mat_path, exclude_prj=True
     )
 
     # Load the gated and (interpolated) nonstop-gated projections
     # NOTE: These each have shape (2*H, 1, v_dim, 512)
-    prj_gcbct = torch.load(
-        os.path.join(g_dir, f"{scan_type}_p{patient}_{scan}.pt")
-    ).detach()
-    prj_ngcbct_li = torch.load(
-        os.path.join(ng_dir, f"{scan_type}_p{patient}_{scan}.pt")
-    ).detach()
+    prj_gcbct = torch.load(gated_pt_path).detach()
+    prj_ngcbct_li = torch.load(ng_pt_path).detach()
 
     # Flip angles if necessary
     angles = torch.from_numpy(np.array(sorted(angles))).float()

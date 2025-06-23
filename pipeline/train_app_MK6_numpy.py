@@ -16,6 +16,7 @@ import logging
 from tqdm import tqdm
 from .utils import ensure_dir
 import ast
+from pipeline.paths import Files
 
 
 # Set up logging
@@ -135,16 +136,17 @@ def get_data_sub_path(
     return sub_path
 
 
-def init_dataloader(config: dict, sample):
+def init_dataloader(config: dict, files: Files, sample: str, model_version: str = None):
     """Initialize the DataLoader for a specific sample ('TRAIN', 'VALIDATION', or 'TEST')."""
-    # Get the path to the training data within the aggregation directory
-    images_sub_path = get_data_sub_path(config, sample, False)
-    images_path = os.path.join(config["AGG_DIR"], images_sub_path)
+    # Get the paths to the training data
+    if model_version is None:
+        images_path = files.get_projections_aggregate_filepath(sample, gated=False)
+        truth_images_path = files.get_projections_aggregate_filepath(sample, gated=True)
+    else:
+        images_path = files.get_images_aggregate_filepath(model_version, sample, gated=False)
+        truth_images_path = files.get_images_aggregate_filepath(model_version, sample, gated=True)
+    
     logger.debug(f"{sample} images path: {images_path}")
-
-    # Get the path to the ground truth data
-    truth_images_sub_path = get_data_sub_path(config, sample, True)
-    truth_images_path = os.path.join(config["AGG_DIR"], truth_images_sub_path)
     logger.debug(f"{sample} ground truth images path: {truth_images_path}")
 
     # Load the dataset
@@ -172,8 +174,11 @@ def init_dataloader(config: dict, sample):
     return dataloader
 
 
+# TODO we should probably extract everything from the config
+#      and just make them attributes of the training app
+# TODO this code should also just generally be cleaned up a bit
 class TrainingApp:
-    def __init__(self, config, domain, DEBUG, MODEL_DIR, AGG_DIR):
+    def __init__(self, config: dict, domain: str, DEBUG: bool, files: Files):
         if domain == "PROJ":
             self.config = config["PD_settings"]
         elif domain == "IMAG":
@@ -184,8 +189,7 @@ class TrainingApp:
             )
 
         self.config["domain"] = domain
-        self.config["MODEL_DIR"] = MODEL_DIR
-        self.config["AGG_DIR"] = AGG_DIR
+        self.files = files
 
         # We need to correct some of the config settings
         # since some values are not read correctly
@@ -227,24 +231,19 @@ class TrainingApp:
         self.criterion = init_loss(self.config)
 
     def main(self):
-        # We will save all the outputs from training in this directory
-        save_directory = os.path.join(
-            self.config["MODEL_DIR"], self.config["model_version"]
-        )
         # Make sure we're not accidentally overwriting an existing model version
-        if os.path.exists(save_directory):
+        save_dir = self.files.directories.get_model_dir(self.config["model_version"], self.config["domain"], ensure_exists=False)
+        if os.path.exists(save_dir):
             logger.error(
-                f"Save directory {save_directory} already exists. Please choose a different model version or delete the existing directory, or manually delete this."
+                f"Save directory {save_dir} already exists. Please choose a different model version or delete the existing directory, or manually delete this."
             )
             return
-        # Create the directory
-        ensure_dir(save_directory)
 
         logger.debug("Starting {}, {}".format(type(self).__name__, self.config))
 
         # Get the dataloaders for training and validation
-        train_dl = init_dataloader(self.config, "TRAIN")
-        val_dl = init_dataloader(self.config, "VALIDATION")
+        train_dl = init_dataloader(self.config, self.files, "TRAIN", self.config["model_version"])
+        val_dl = init_dataloader(self.config, self.files, "VALIDATION", self.config["model_version"])
 
         # Initialize the tensorboard writers if enabled
         if self.config["tensor_board"]:
@@ -382,10 +381,7 @@ class TrainingApp:
                 epoch_ndx % self.config["checkpoint_save_step"] == 0
                 or epoch_ndx == self.config["epochs"]
             ):
-                save_path = os.path.join(
-                    save_directory,
-                    f"epoch-{epoch_ndx:02}_{'ID' if self.config['domain'] == 'IMAG' else 'PD'}.pkl",
-                )
+                save_path = self.files.get_model_filepath(self.config["model_version"], self.config["domain"], checkpoint=epoch_ndx)
                 torch.save(
                     {
                         "epoch": epoch_ndx,
@@ -400,10 +396,7 @@ class TrainingApp:
 
                 # Delete most recent checkpoint to save space
                 if epoch_ndx > self.config["checkpoint_save_step"]:
-                    old_save_path = os.path.join(
-                        save_directory,
-                        f"epoch-{epoch_ndx - self.config['checkpoint_save_step']:02}_{'ID' if self.config['domain'] == 'IMAG' else 'PD'}.pkl",
-                    )
+                    old_save_path = self.files.get_model_filepath(self.config["model_version"], self.config["domain"], checkpoint=epoch_ndx - self.config["checkpoint_save_step"])
                     if os.path.exists(old_save_path):
                         os.remove(old_save_path)
                         logger.debug(
@@ -425,31 +418,24 @@ class TrainingApp:
         # Training is done
         logger.info("Saving training results...")
         # Save the final model state
-        model_path = os.path.join(
-            save_directory,
-            f"{self.config['network_name']}_{self.config['model_version']}_DS{self.config['data_version']}_{self.config['scan_type']}_{'ID' if self.config['domain'] == 'IMAG' else 'PD'}.pth",
-        )
+        model_path = self.files.get_model_filepath(self.config["model_version"], self.config["domain"])
         torch.save(
             self.model.state_dict(),
             model_path,
         )
         logger.info(f"Model saved to {model_path}")
         # Save the training and validation loss values
+        train_loss_path = self.files.get_train_loss_filepath(self.config["model_version"], self.config["domain"])
         torch.save(
             avg_train_loss_values,
-            os.path.join(
-                save_directory,
-                f"train_loss_{'ID' if self.config['domain'] == 'IMAG' else 'PD'}.pth",
-            ),
+            train_loss_path,
         )
+        validation_loss_path = self.files.get_validation_loss_filepath(self.config["model_version"], self.config["domain"])
         torch.save(
             avg_val_loss_values,
-            os.path.join(
-                save_directory,
-                f"validation_loss_{'ID' if self.config['domain'] == 'IMAG' else 'PD'}.pth",
-            ),
+            validation_loss_path,
         )
-        logger.info(f"Training and validation loss saved to {save_directory}\n")
+        logger.info(f"Training and validation loss saved\n")
 
         # Clean up tensor board writers
         if self.config["tensor_board"]:

@@ -81,19 +81,22 @@ class Directories:
             ensure_dir(dir_path)
 
         return dir_path
-    
-    def get_projections_results_dir(self, model_version, ensure_exists=True):
+
+    def get_projections_results_dir(self, model_version, passthrough_num=None, ensure_exists=True):
         """
         Get the directory path for the projection results of a specific PD model version.
         """
         dir_path = os.path.join(self.projections_results_dir, model_version)
-        
+
+        if passthrough_num is not None:
+            dir_path = os.path.join(dir_path, f"passthrough_{passthrough_num:02d}")
+
         if ensure_exists:
             ensure_dir(dir_path)
 
         return dir_path
 
-    def get_reconstructions_dir(self, model_version, ensure_exists=True):
+    def get_reconstructions_dir(self, model_version, passthrough_num=None, ensure_exists=True):
         """
         Get the directory path for the reconstructions of a specific PD model version.
 
@@ -102,6 +105,9 @@ class Directories:
             you can just pass that identifier instead (e.g., 'fdk' or 'pl').
         """
         dir_path = os.path.join(self.reconstructions_dir, model_version)
+
+        if passthrough_num is not None:
+            dir_path = os.path.join(dir_path, f"passthrough_{passthrough_num:02d}")
 
         if ensure_exists:
             ensure_dir(dir_path)
@@ -348,7 +354,7 @@ class Files:
         
         return f"p{patient}_{scan}.mat" # e.g., p01_01.mat
 
-    def get_projections_results_filepath(self, model_version, patient, scan, scan_type, gated, ensure_exists=True):
+    def get_projections_results_filepath(self, model_version, patient, scan, scan_type, gated, passthrough_num=None, ensure_exists=True):
         """
         Get the absolute file path for the projection results `.mat` file.
 
@@ -358,6 +364,7 @@ class Files:
             scan (str): Scan identifier, e.g. '01'.
             scan_type (str): Type of scan, either 'HF', 'FF'.
             gated (bool): Whether the projections are gated or not.
+            passthrough_num (int, optional): The passthrough number (leave as None for deterministic).
             ensure_exists (bool, optional): Whether to ensure the directory exists.
 
         Returns:
@@ -368,7 +375,7 @@ class Files:
         if gated:
             dir_ = self.directories.projections_gated_dir
         else:
-            dir_ = self.directories.get_projections_results_dir(model_version, ensure_exists)
+            dir_ = self.directories.get_projections_results_dir(model_version, passthrough_num, ensure_exists)
         
         return os.path.join(dir_, filename)
     
@@ -391,7 +398,7 @@ class Files:
         
         return f"p{patient}_{scan}.pt" # e.g., p01_01.pt
 
-    def get_recon_filepath(self, model_version, patient, scan, scan_type, gated, ensure_exists=True):
+    def get_recon_filepath(self, model_version, patient, scan, scan_type, gated, passthrough_num=None, ensure_exists=True):
         """
         Get the absolute file path for the FDK reconstruction `.pt` file.
 
@@ -401,6 +408,7 @@ class Files:
             scan (str): Scan identifier, e.g. '01'.
             scan_type (str): Type of scan, either 'HF', 'FF'.
             gated (bool): Whether the reconstruction is gated or not.
+            passthrough_num (int, optional): The passthrough number (leave as None for deterministic).
             ensure_exists (bool, optional): Whether to ensure the directory exists.
 
         Returns:
@@ -411,7 +419,7 @@ class Files:
         if gated:
             dir_ = self.directories.reconstructions_gated_dir
         else:
-            dir_ = self.directories.get_reconstructions_dir(model_version, ensure_exists)
+            dir_ = self.directories.get_reconstructions_dir(model_version, passthrough_num,ensure_exists)
 
         return os.path.join(dir_, filename)
     

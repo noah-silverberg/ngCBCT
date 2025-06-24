@@ -6,7 +6,7 @@ PD_settings:
   epochs: 20 # Number of epochs for PD training
   learning_rate: 1e-3  # Either float or list (if the list is shorter than the number of epochs, the last value is used for the rest of the epochs)
   network_name: "IResNet"  # Network name for PD CNN (see network_instance.py)
-  model_version: "MK6" # NOTE: The model names will be: [NETWORK_NAME]_[MODEL_VERSION]_DS[DATA_VERSION]_[SCAN_TYPE]_[ID/PD]
+  model_version: "MK7" # Unique model name (note: you can have the same name for an image domain model)
   batch_size: 8 # Batch size for PD training
   optimizer: "NAdam" # Optimizer for PD training (SGD, Adam, or NAdam)
   num_workers: 0 # Number of workers for data loading (0 means only the main process will load data)
@@ -23,6 +23,7 @@ PD_settings:
   train_during_inference: false  # Whether to put the model in training mode during inference (e.g., for MC dropout)
   ensemble_size: 1 # Number of models to train
   scan_type: "HF" # Scan type for PD training (HF or FF) -- make sure it matches the aggregated data
+  passthrough_count: 1 #  The number of passthroughs to use when creating outputs for the model (for deterministic models 1, for probabilistic you'll probably want >1)
 
   # Ignore -- not used for PD training (just have to be defined)
   input_type: null
@@ -34,7 +35,7 @@ ID_settings:
   epochs: 50
   learning_rate: 1e-3
   network_name: "IResNet"
-  model_version: "MK6"
+  model_version: "MK7"
   batch_size: 8
   optimizer: "NAdam"
   num_workers: 0
@@ -51,4 +52,6 @@ ID_settings:
   train_during_inference: false
   ensemble_size: 1
   scan_type: "HF"
-  input_type: "FDK" # Input type for ID training (FDK or PL)
+  input_type: "MK7" # Input type for ID training, i.e., PL or some trained & reconstructed PD model name
+  input_type_match_ensemble: true # When training an ensemble, whether the input type should have an extra identifier (e.g., _01) which matches the ID model name
+  passthrough_count: 1

@@ -11,12 +11,14 @@
 \newcommand{\s}{\scalebox{0.75}[1.0]{$-$}}
 \newcommand{\abs}[1]{\left|#1\right|}
 \newcommand{\mf}{\mathfrak}
+\newcommand{\mc}{\mathcal}
 \renewcommand{\b}{\mathbf}
 \newcommand{\bs}{\boldsymbol}
 \newcommand{\uv}[1]{\b{\hat{#1}}}
 \newcommand{\uvs}[1]{\bs{\hat{#1}}}
 
 \newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
 \newcommand{\N}{\mathbb{N}}
 \newcommand{\Q}{\mathbb{Q}}
 \newcommand{\Z}{\mathbb{Z}}
@@ -193,17 +195,122 @@ $$\mathcal{L}(\gamma, \nu, \alpha, \beta \mid y) = \mathcal{L}_\mathrm{NLL}(\gam
   \item It doesn't necessarily know how to handle out-of-distribution data (this is kind of important actually since the uncertainty values we get from it will only really be valid if the data is similar to the training data).
 \end{itemize}
 
+\subsection{Application to Dual-Domain CBCT Pipeline}
+
+% Place this block after your Pros/Cons list under Evidential Regression.
+
+\subsubsection{Setup}
+We denote the projection-domain network (PD) by $f_\text{PD}(x; \theta_\text{PD})$, which maps undersampled/interpolated projections $x$ to ``gated" projections. And we will write the reconstructed image as $\mathrm{FDK}\big(f_\text{PD}(x;\theta_\text{PD})\big)$. The image-domain network (ID) is $f_\text{ID}(I; \theta_\text{ID})$, which will output evidential parameters $(\gamma,\nu,\alpha,\beta)$ per pixel to characterize $p(y \mid \gamma,\nu,\alpha,\beta)$.
+
+\subsubsection{Training}
+In the PD we will use a model with MC dropout. (Luckily we already have this from the MC dropout training, so we can just use this as-is.) Note that if we were to use a deterministic PD model during training, the epistemic PD uncertainty would never be propagated through to the ID (since it is never even quantified in the first place). Note also that we can't use an evidential head in the PD,  since we can't analytically propagate the outputted uncertainties through FDK.
+
+So our only hope for quantifying and propagating PD uncertainty is to do some sort of Monte Carlo sampling through the FDK step -- there doesn't appear to be any way around this. \textit{However}, fortunately this is only true of the training. Consider the following. If we have an evidential ID network, during training the ID network will see variations in its inputs, which are combined true aleatoric uncertainty and PD epistemic uncertainty. However, as far as the ID network is concerned, it doesn't ``know" that these variations include PD epistemic uncertainty -- it simply sees this as uncertainty in its input data. So it will learn the ``aleatoric" uncertainty, which is actually the combined true aleatoric uncertainty plus the PD epistemic uncertainty. Combining this with the ID model uncertainty, we get the total uncertainty of the dual-domain pipeline, including aleatoric uncertainty. [[TODO -- can we remove the true aleatoric uncertainty somehow?]]
+
+During inference, then, we don't really need to do MC sampling in the PD, since a single pass through the PD$\to$FDK$\to$ID will already include the true aleatoric uncertainty, the PD epistemic uncertainty, and the ID epistemic uncertainty (since this was all learned by the ID evidential head during training). So our MC dropout in the PD only needs to be done during training, thankfully. This allows us to still do a single forward pass during inference to get both our clean reconstructed image and our uncertainty map.
+
+More concretely:
+\begin{enumerate}[1.]
+  \item \textbf{PD sampling:} For each training projection input $x_i$, sample $K$ variants of PD outputs by applying MC-dropout at training time: 
+    \[
+      s_i^{(k)} = f_\text{PD}(x_i; \hat\theta_\text{PD}, \text{mask}^{(k)}), \quad k=1,\dots,K.
+    \]
+  \item \textbf{FDK reconstructions:} For each sampled sinogram $s_i^{(k)}$, compute $I_i^{(k)} = \mathrm{FDK}\bigl(s_i^{(k)}\bigr)$. This yields $K$ image inputs per scan.
+  \item \textbf{ID training set:} Form the dataset $\{(I_i^{(k)}, y_i^\text{truth}) : i=1,\dots,N,\;k=1,\dots,K\}$. The ID evidential network sees varied inputs mapping to the same ground truth. Again, these variations in the inputs are due to both true aleatoric uncertainty and also PD epistemic uncertainty. For example if we train for 50 epochs, we might set $K=10$ and use each image 5 times. Ideally we would have $K=50$ (if time/storage allows) so we never re-use training data, since this would give our ID the best chance of handling the underlying PD model distribution. Note that this is actually quite nice for ID training -- ideally, for all models we would have an infinite stream of training data, so we could only use each sample once (since this would provide an unbiased estimate of the gradient during optimization). However, normally we don't have enough data for that, so we have to use repeated samples. Although this performs well empirically, we technically speaking are biased since the samples aren't independent. By being able to sample infinitely from the PD model (effectively, although technically speaking we only have a finite number of possible Bernoulli masks) for our ID training data, we get one step closer to the ideal case of infinite training data from the underlying distribution. However, to be fair we aren't \textit{fully} at the ideal case yet, since we are still biased in that we only are adding PD epistemic uncertainty to a fixed set of training scans -- we don't also get infinite samples from the underlying scan distribution.  But the training strategy is still closer than reusing the same training data for 50 epochs.
+  \item \textbf{Loss:}
+There are a few loss functions we will need to try. The one discussed earlier from \cite{amini2020deep} is the ``basic" one. However, there are some theoretical issues with this, such as the ``evidence contraction" problem [[TODO -- cite papers]]. There are various loss terms that have been proposed to handle this. We also would probably want to still include some normal loss term like $L^1$ (or smooth $L^1$ as we are currently using). We will need to do lots of hyperparameter tuning to control the strength of each of these terms in the loss function. We might also want to consider  having these hyperparameters change throughout the course of training (e.g., we might want the $L^1$ to dominate at the start to get us in a region of the loss landscape where the reconstruction is good, and then let the evidential terms increase their influence later in training to fine tune the uncertainties without harming the reconstruction accuracy too much).
+\end{enumerate}
+
+\subsubsection{Inference}
+At inference, run:
+\[
+  s^\ast = f_\text{PD}(x^\ast; \hat\theta_\text{PD}) \quad\to\quad I^\ast = \mathrm{FDK}(s^\ast) \quad\to\quad (\gamma,\nu,\alpha,\beta) = f_\text{ID}(I^\ast; \hat\theta_\text{ID}).
+\]
+The output predictive variance 
+\[
+  \underbrace{\mathbb{E}[\sigma^2]}_{\text{aleatoric + PD epistemic}} \;+\; \underbrace{\mathrm{Var}[\mu]}_{\text{ID epistemic}}
+\]
+approximates the total uncertainty learned from PD sampling during training. We do not decompose PD epistemic explicitly, but its effect is baked into the learned aleatoric term. 
+
 \section{MC Dropout}
 
 [[TODO -- general idea is that this requires minimal changes to DDCNN architecture (just need to turn on dropout during training and inference), but the main issue is that it takes multiple forward passes to get the uncertainty estimates, which is not practical in a clinical setting. This does seem to have good performance empirically, though.]]
+
+\subsection{Dual-Domain MC Dropout Training and Inference}
+
+We train the PD CNN with dropout, and propagate PD uncertainty into the ID by sampling the dropout/Bernoulli masks. At inference we do multiple forward passes to estimate uncertainty.
+
+\subsubsection{PD Training}
+Train the projection-domain network $f_\text{PD}(x;\theta_\text{PD})$ with dropout in the usual way on training projections. This yields a model that, when run with dropout at inference, produces approximate posterior samples \cite{gal2016dropoutbayesianapproximationrepresenting}.
+
+\subsubsection{ID Training}
+Since we want the ID to see PD-induced variability:
+\begin{enumerate}[1.]
+  \item \textbf{PD sampling:} For each training projection input $x_i$, perform $K$ forward passes with dropout active:
+    \[
+      s_i^{(k)} = f_\text{PD}(x_i;\hat\theta_\text{PD},\text{mask}^{(k)}),\quad k=1,\dots,K.
+    \]
+    (this is identical to the evidential strategy proposed earlier)
+  \item \textbf{FDK reconstructions:} For each $s_i^{(k)}$, compute 
+    \[
+      I_i^{(k)} = \mathrm{FDK}\bigl(s_i^{(k)}\bigr).
+    \]
+    This yields $K$ image inputs per scan.
+  \item \textbf{ID training set:} Form $\{(I_i^{(k)},y_i^\text{truth})\}$ and train the ID network $f_\text{ID}(I;\theta_\text{ID})$ (e.g.\ standard regression loss or with an uncertainty head). The ID thus learns to handle input variations arising from PD dropout.
+\end{enumerate}
+
+\subsubsection{Inference}
+At test time, for each new input $x^\ast$:
+\begin{enumerate}[1.]
+  \item Perform $M$ forward passes through PD with dropout active:
+    \[
+      s^{(m)} = f_\text{PD}(x^\ast;\hat\theta_\text{PD},\text{mask}^{(m)}), \quad m=1,\dots,M.
+    \]
+  \item For each $s^{(m)}$, compute $I^{(m)} = \mathrm{FDK}(s^{(m)})$, then run ID to obtain predictions $\hat y^{(m)} = f_\text{ID}(I^{(m)};\hat\theta_\text{ID})$.
+  \item Aggregate $\{\hat y^{(m)}\}$ (e.g.\ compute mean and variance) as final output and uncertainty estimate.
+\end{enumerate}
+This yields total epistemic uncertainty from PD dropout and ID model uncertainty, since we have dropout on for both domains at inference.  
+
 
 \section{Bayesian By Backprop (BBB)}
 
 [[TODO -- general idea is that this requires a lot of changes to the DDCNN architecuture, but it is fully Bayesian. Similar to MC Dropout, though, we need to do multiple forward passes to get the uncertainty estimates, which is not practical in a clinical setting. Also it doesn't seem to have super good performance from what I've read.]]
 
+\subsection{Dual-Domain BBB Training and Inference}
+
+This is entirely analogous to the MC dropout training and inference case -- we treat them the same.
+
+
 \section{Deep Ensembles}
 
 [[TODO -- this requires no changes at all which is really nice. But it suffers again from the same issue as MCD and BBB which is multiple forward passes. However this emprirically does have good results.]]
+
+\subsection{Dual-Domain Deep Ensembles}
+
+We train multiple PD and ID models independently. At inference we perform multiple forward passes across the ensemble to estimate total uncertainty.
+
+\subsubsection{PD and ID Paired Training}
+\begin{enumerate}[1.]
+  \item \textbf{PD ensemble:} Train $M$ PD networks $\{f_{\text{PD},i}(x;\theta_{\text{PD},i})\}_{i=1}^M$ from different random initializations (and optionally different shuffles/augmentations).
+  \item \textbf{ID paired:} For each PD$_i$, generate sinogram outputs on all training inputs:
+    \[
+      s_{i,j} = f_{\text{PD},i}(x_j;\hat\theta_{\text{PD},i}),\quad j=1,\dots,N.
+    \]
+    Compute $I_{i,j} = \mathrm{FDK}(s_{i,j})$. Train ID$_i$ on $\{(I_{i,j},y_j^\text{truth})\}$.
+\end{enumerate}
+Note that we do \textit{not} combine the results from the different PD models since then we would not actually have an ensemble anymore, i.e., the PD component of each ``ensemble" component would have overlap since they would contain outputs from the sane models, and therefore we would not get a true ensemble.
+
+\subsubsection{Inference}
+For a test input $x^\ast$:
+\begin{enumerate}[1.]
+  \item For each ensemble member $i=1,\dots,M$, run
+    \[
+      s_i^\ast = f_{\text{PD},i}(x^\ast;\hat\theta_{\text{PD},i}),\quad I_i^\ast = \mathrm{FDK}(s_i^\ast),\quad \hat y_i^\ast = f_{\text{ID},i}(I_i^\ast;\hat\theta_{\text{ID},i}).
+    \]
+  \item Aggregate $\{\hat y_i^\ast\}$ (mean, variance) to obtain final prediction and uncertainty.
+\end{enumerate}
+This captures total epistemic uncertainty across PD and ID ensembles.
+
 
 % Create bibliography with sensoy paper
 \bibliographystyle{plain}

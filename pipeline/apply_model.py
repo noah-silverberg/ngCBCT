@@ -33,8 +33,15 @@ def apply_model_to_projections(
     gated_pt_path: str,
     ng_pt_path: str,
     device: torch.device,
+    train_at_inference: bool = False,  # for MC dropout
 ):
     """Apply CNN model slice-wise to nonstop-gated projections to predict missing projections and combine."""
+    if train_at_inference:
+        # Set the model to train mode for MC dropout
+        model.train()
+    else:
+        model.eval()
+
     # Get the acquired nonstop-gated indices and angles from the .mat file
     # NOTE: excluding prj speeds it speeds up a bit
     odd_index, angles = load_projection_mat(

@@ -23,6 +23,7 @@ PD_settings:
   train_during_inference: false  # Whether to put the model in training mode during inference (e.g., for MC dropout)
   ensemble_size: 1 # Number of models to train
   scan_type: "HF" # Scan type for PD training (HF or FF) -- make sure it matches the aggregated data
+  passthrough_count: 1 #  The number of passthroughs to use when creating outputs for the model (for deterministic models 1, for probabilistic you'll probably want >1)
 
   # Ignore -- not used for PD training (just have to be defined)
   input_type: null
@@ -53,3 +54,4 @@ ID_settings:
   scan_type: "HF"
   input_type: "MK7" # Input type for ID training, i.e., PL or some trained & reconstructed PD model name
   input_type_match_ensemble: true # When training an ensemble, whether the input type should have an extra identifier (e.g., _01) which matches the ID model name
+  passthrough_count: 1

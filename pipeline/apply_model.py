@@ -154,8 +154,9 @@ def apply_model_to_recons(
 ):
     """Apply CNN model slice-wise to nonstop-gated reconstructions to clean up image domain artifacts."""
     # Load the nonstop-gated reconstruction
-    # NOTE: These each have shape (160, 1, 512, 512) for HF and shape (160, 1, 256, 256) for FF
+    # NOTE: These each have shape (160, 512, 512) for HF and shape (160, 256, 256) for FF
     recon = torch.load(pt_path).detach().to(device)
+    recon = torch.unsqueeze(recon, 1)  # Add channel dimension
 
     if train_at_inference:
         # Set the model to train mode for MC dropout

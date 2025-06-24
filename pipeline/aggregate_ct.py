@@ -7,7 +7,7 @@ from pipeline.dsets import normalizeInputsClip
 logger = logging.getLogger("pipeline")
 
 
-def aggregate_saved_recons(scan_type: str, sample: str, recon_pt_dir: str, AGG_SCANS: dict, truth: bool, augment: bool):
+def aggregate_saved_recons(paths: list[str], augment: bool):
     """
     Load per-scan reconstruction tensors, concatenate across scans, and save aggregates.
 
@@ -20,16 +20,11 @@ def aggregate_saved_recons(scan_type: str, sample: str, recon_pt_dir: str, AGG_S
     Returns:
         recon_agg (torch.Tensor): Concatenated reconstructions tensor.
     """
-
-    # Extract the scans for the given sample
-    scans = AGG_SCANS[sample]
-
     # Concatenate all scans into one tensor
     # along the 1st dim (scan dimension)
-    for i, (patient, scan, scan_type) in tqdm(enumerate(scans), desc="Aggregating reconstructions"):
-        recon = torch.load(os.path.join(recon_pt_dir, f"FDK_{'gated' if truth else 'ng'}_{scan_type}_p{patient}_{scan}.pt")).detach().float()
+    for i, path in tqdm(enumerate(paths), desc="Aggregating reconstructions"):
+        recon = torch.load(path).detach().float()
         recon = normalizeInputsClip(recon)
-        recon = recon.permute(2, 0, 1)
         recon = torch.unsqueeze(recon, 1)
 
         if i == 0:
@@ -37,12 +32,12 @@ def aggregate_saved_recons(scan_type: str, sample: str, recon_pt_dir: str, AGG_S
             # We assume all reconstructions have the same shape
             if augment:
                 recon_agg = torch.empty(
-                    (3 * len(scans) * recon.shape[0], recon.shape[1], recon.shape[2], recon.shape[3]),
+                    (3 * len(paths) * recon.shape[0], recon.shape[1], recon.shape[2], recon.shape[3]),
                     dtype=recon.dtype,
                 ).detach()
             else:
                 recon_agg = torch.empty(
-                    (len(scans) * recon.shape[0], recon.shape[1], recon.shape[2], recon.shape[3]),
+                    (len(paths) * recon.shape[0], recon.shape[1], recon.shape[2], recon.shape[3]),
                     dtype=recon.dtype,
                 ).detach()
 
@@ -57,6 +52,6 @@ def aggregate_saved_recons(scan_type: str, sample: str, recon_pt_dir: str, AGG_S
         del recon
         
 
-    logger.debug(f"Aggregated {'gated' if truth else 'nonstop-gated'} reconstructions shape: {recon_agg.shape}")
+    logger.debug(f"Aggregated reconstructions shape: {recon_agg.shape}")
 
     return recon_agg

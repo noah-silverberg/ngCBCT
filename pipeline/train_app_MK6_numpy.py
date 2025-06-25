@@ -35,8 +35,10 @@ else:
 
 def init_model(config: dict):
     """Initialize the CNN model and move it to the GPU."""
-    model = getattr(network_instance, config["network_name"])()
+    model = getattr(network_instance, config["network_name"])(**config["network_kwargs"])
     model = model.to(device)
+    
+    logger.debug(model)
 
     return model
 

@@ -6,6 +6,7 @@ PD_settings:
   epochs: 20 # Number of epochs for PD training
   learning_rate: 1e-3  # Either float or list (if the list is shorter than the number of epochs, the last value is used for the rest of the epochs)
   network_name: "IResNet"  # Network name for PD CNN (see network_instance.py)
+  network_kwargs: {}  # Additional keyword arguments for the network (e.g., {'p': 0.5} for dropout)
   model_version: "MK7" # Unique model name (note: you can have the same name for an image domain model)
   batch_size: 8 # Batch size for PD training
   optimizer: "NAdam" # Optimizer for PD training (SGD, Adam, or NAdam)
@@ -35,6 +36,7 @@ ID_settings:
   epochs: 50
   learning_rate: 1e-3
   network_name: "IResNet"
+  network_kwargs: {}
   model_version: "MK7"
   batch_size: 8
   optimizer: "NAdam"

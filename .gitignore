@@ -12,3 +12,6 @@ Data/
 __pycache__/
 *.pt
 *.mat
+3D_recon/
+.vs/
+phase7/

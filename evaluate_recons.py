@@ -374,8 +374,7 @@ def main():
                 # only clip/normalize GT, FDK, PL
                 for arr in (gt, fdk_v, pl_v):
                     np.clip(arr, 0, 0.04, out=arr)
-                    arr -= arr.min()
-                    arr /= arr.max()
+                    arr *= 25.
                 # leave dd_v unchanged
 
                 # make output subdir

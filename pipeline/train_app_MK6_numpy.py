@@ -323,7 +323,7 @@ class TrainingApp:
             )
 
             # Validation phase
-            if self.config["train_during_inference"]:
+            if self.config["train_at_inference"]:
                 # If training during inference, set the model to training mode
                 # for MC dropout, for example
                 logger.warning(

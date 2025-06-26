@@ -1,8 +1,6 @@
-import os
 import numpy as np
 import torch
-from .proj import load_projection_mat
-from . import network_instance
+from pipeline import network_instance
 import logging
 from pipeline.dsets import normalizeInputsClip
 
@@ -30,9 +28,10 @@ def load_model(
 def apply_model_to_projections(
     model: torch.nn.Module,
     scan_type: str,
-    mat_path: str,
-    gated_pt_path: str,
-    ng_pt_path: str,
+    odd_index: np.ndarray,
+    angles: np.ndarray,
+    prj_gcbct: torch.Tensor,
+    prj_ngcbct_li: torch.Tensor,
     device: torch.device,
     train_at_inference: bool = False,  # for MC dropout
 ):
@@ -43,17 +42,6 @@ def apply_model_to_projections(
         logger.info("Running model in train mode for MC dropout.")
     else:
         model.eval()
-
-    # Get the acquired nonstop-gated indices and angles from the .mat file
-    # NOTE: excluding prj speeds it speeds up a bit
-    odd_index, angles = load_projection_mat(
-        mat_path, exclude_prj=True
-    )
-
-    # Load the gated and (interpolated) nonstop-gated projections
-    # NOTE: These each have shape (2*H, 1, v_dim, 512)
-    prj_gcbct = torch.load(gated_pt_path).detach()
-    prj_ngcbct_li = torch.load(ng_pt_path).detach()
 
     # Flip angles if necessary
     angles = torch.from_numpy(np.array(sorted(angles))).float()

@@ -1,18 +1,17 @@
-import os
 import numpy as np
 import torch
-from .proj import load_projection_mat
-from . import network_instance
+from pipeline import network_instance
 import logging
+from pipeline.dsets import normalizeInputsClip
 
 logger = logging.getLogger("pipeline")
 
 
 def load_model(
-    network_name: str, model_path: str, device: torch.device
+    network_name: str, network_kwargs: dict, model_path: str, device: torch.device
 ):
     # Load and instantiate the network class dynamically
-    model = getattr(network_instance, network_name)()
+    model = getattr(network_instance, network_name)(**network_kwargs)
 
     # Load the model state and send it to the GPU
     state = torch.load(model_path)
@@ -29,22 +28,20 @@ def load_model(
 def apply_model_to_projections(
     model: torch.nn.Module,
     scan_type: str,
-    mat_path: str,
-    gated_pt_path: str,
-    ng_pt_path: str,
+    odd_index: np.ndarray,
+    angles: np.ndarray,
+    prj_gcbct: torch.Tensor,
+    prj_ngcbct_li: torch.Tensor,
     device: torch.device,
+    train_at_inference: bool = False,  # for MC dropout
 ):
     """Apply CNN model slice-wise to nonstop-gated projections to predict missing projections and combine."""
-    # Get the acquired nonstop-gated indices and angles from the .mat file
-    # NOTE: excluding prj speeds it speeds up a bit
-    odd_index, angles = load_projection_mat(
-        mat_path, exclude_prj=True
-    )
-
-    # Load the gated and (interpolated) nonstop-gated projections
-    # NOTE: These each have shape (2*H, 1, v_dim, 512)
-    prj_gcbct = torch.load(gated_pt_path).detach()
-    prj_ngcbct_li = torch.load(ng_pt_path).detach()
+    if train_at_inference:
+        # Set the model to train mode for MC dropout
+        model.train()
+        logger.info("Running model in train mode for MC dropout.")
+    else:
+        model.eval()
 
     # Flip angles if necessary
     angles = torch.from_numpy(np.array(sorted(angles))).float()
@@ -147,8 +144,10 @@ def apply_model_to_recons(
 ):
     """Apply CNN model slice-wise to nonstop-gated reconstructions to clean up image domain artifacts."""
     # Load the nonstop-gated reconstruction
-    # NOTE: These each have shape (160, 1, 512, 512) for HF and shape (160, 1, 256, 256) for FF
+    # NOTE: These each have shape (160, 512, 512) for HF and shape (160, 256, 256) for FF
     recon = torch.load(pt_path).detach().to(device)
+    recon = normalizeInputsClip(recon)
+    recon = torch.unsqueeze(recon, 1)  # Add channel dimension
 
     if train_at_inference:
         # Set the model to train mode for MC dropout

@@ -51,4 +51,4 @@ ID_settings:
   train_during_inference: false
   ensemble_size: 1
   scan_type: "HF"
-  input_type: "FDK" # Input type for ID training (FDK or PL)
+  input_type: "FDK" # Input type for ID training (FDK or PL or a specific PD model name)

@@ -17,6 +17,7 @@ from tqdm import tqdm
 from .utils import ensure_dir
 import ast
 from pipeline.paths import Files
+import math # Added for BBB beta calculation
 
 
 # Set up logging
@@ -172,6 +173,7 @@ class TrainingApp:
 
         self.config["domain"] = domain
         self.files = files
+        self.is_bayesian = "IResNetBBB" == self.config["network_name"]
 
         # We need to correct some of the config settings
         # since some values are not read correctly
@@ -198,6 +200,12 @@ class TrainingApp:
             self.config["weight_decay_SGD"] = ast.literal_eval(
                 self.config["weight_decay_SGD"]
             )
+
+        # Add default settings for BBB if not present in config
+        if self.is_bayesian:
+            self.config.setdefault('beta_type', 'Blundell')
+            logger.info(f"Bayesian model detected. Using beta type: {self.config['beta_type']}")
+
 
         # Set logging level
         if DEBUG:
@@ -230,6 +238,28 @@ class TrainingApp:
         self.optimizer.load_state_dict(optimizer_state)
         self.start_epoch = checkpoint_epoch + 1  # Resume from the next epoch
         logger.info(f"Resumed training from checkpoint: Epoch {checkpoint_epoch}")
+        
+    def _calculate_beta(self, batch_idx, epoch_ndx, num_batches):
+        """Calculates the beta value for weighting the KL divergence term."""
+        beta_type = self.config.get('beta_type', 'Standard')
+
+        if epoch_ndx > 1: # After the first epoch, beta is always 1
+            return 1.0
+
+        if beta_type == 'Blundell':
+            # Formula from "Weight Uncertainty in Neural Networks" (Blundell et al., 2015)
+            # This anneals beta from a small value to 1 over the first epoch.
+            beta = (2**(num_batches - batch_idx - 1)) / (2**num_batches - 1)
+        elif beta_type == 'Soenderby':
+            # Ramp-up beta over first half of the batches in the first epoch
+            beta = min(1.0, (batch_idx + 1) / (num_batches * 0.5))
+        elif beta_type == 'Standard':
+            beta = 1.0
+        else:
+            logger.warning(f"Unknown beta type: {beta_type}. Defaulting to 'Standard' (beta=1.0).")
+            beta = 1.0
+        return beta
+
 
     def main(self):
         # Make sure we're not accidentally overwriting an existing model version
@@ -245,6 +275,8 @@ class TrainingApp:
         # Get the dataloaders for training and validation
         train_dl = init_dataloader(self.config, self.files, "TRAIN", self.config["input_type"], self.config['domain'])
         val_dl = init_dataloader(self.config, self.files, "VALIDATION", self.config["input_type"], self.config['domain'])
+
+        num_train_batches = len(train_dl)
 
         # Initialize the tensorboard writers if enabled
         if self.config["tensor_board"]:
@@ -282,7 +314,7 @@ class TrainingApp:
             epoch_train_start_time = time.time()
 
             # Loop throught the batches in the training dataloader
-            for train_set in tqdm(train_dl, desc=f"Epoch {epoch_ndx} Training"):
+            for batch_idx, train_set in enumerate(tqdm(train_dl, desc=f"Epoch {epoch_ndx} Training")):
 
                 # Extract the input and ground truth (they are already on GPU)
                 train_inputs = train_set[0].float()
@@ -291,7 +323,15 @@ class TrainingApp:
                 # Zero out the gradients, do a forward pass, compute the loss, and backpropagate
                 self.optimizer.zero_grad()
                 train_outputs = self.model(train_inputs)
-                train_loss = self.criterion(train_outputs, train_truths)
+
+                if self.is_bayesian:
+                    reconstruction_loss = self.criterion(train_outputs, train_truths)
+                    kl_loss = self.model.kl_divergence()
+                    beta = self._calculate_beta(batch_idx, epoch_ndx, num_train_batches)
+                    train_loss = reconstruction_loss + beta * kl_loss
+                else:
+                    train_loss = self.criterion(train_outputs, train_truths)
+
                 train_loss.backward()
 
                 # Clip gradients if needed
@@ -353,8 +393,15 @@ class TrainingApp:
 
                     # Do a forward pass and calculate the loss
                     val_outputs = self.model(val_inputs)
-                    val_loss = self.criterion(val_outputs, val_truths)
 
+                    if self.is_bayesian:
+                        reconstruction_loss = self.criterion(val_outputs, val_truths)
+                        kl_loss = self.model.kl_divergence()
+                        # For validation, beta is typically 1.0 to get the full ELBO loss
+                        val_loss = reconstruction_loss + kl_loss
+                    else:
+                        val_loss = self.criterion(val_outputs, val_truths)
+                    
                     # Update epoch validation loss
                     epoch_total_val_loss += val_loss.item() * val_inputs.size(0)
 

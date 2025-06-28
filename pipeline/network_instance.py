@@ -962,8 +962,8 @@ class IResNetDropout(nn.Module):
 
         self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
 
-        self.conv1 = ConvBlockDropout(ch_in=img_ch, ch_out=64, p=p)
-        self.conv1_extra = SingleConvDropout(ch_in=64, ch_out=64, p=p)
+        self.conv1 = ConvBlock(ch_in=img_ch, ch_out=64, p=p)
+        self.conv1_extra = ConvBlock(ch_in=64, ch_out=64, p=p)
         self.conv2 = ConvBlockDropout(ch_in=64, ch_out=128, p=p)
         self.conv3 = ConvBlockDropout(ch_in=128, ch_out=256, p=p)
         self.conv4 = ConvBlockDropout(ch_in=256, ch_out=512, p=p)
@@ -978,8 +978,8 @@ class IResNetDropout(nn.Module):
         self.up_conv4 = ConvBlockDropout(ch_in=512, ch_out=256, p=p)
         self.up3 = UpConvBlockDropout(ch_in=256, ch_out=128, up_conv=up_conv, p=p)
         self.up_conv3 = ConvBlockDropout(ch_in=256, ch_out=128, p=p)
-        self.up2 = UpConvBlockDropout(ch_in=128, ch_out=64, up_conv=up_conv, p=p)
-        self.up_conv2 = ConvBlockDropout(ch_in=128, ch_out=64, p=p)
+        self.up2 = UpConvBlock(ch_in=128, ch_out=64, up_conv=up_conv, p=p)
+        self.up_conv2 = ConvBlock(ch_in=128, ch_out=64, p=p)
 
         self.conv_1x1 = nn.Conv2d(64, output_ch, kernel_size=1, stride=1, padding=0)
 
@@ -1043,7 +1043,7 @@ class BayesianLayer(nn.Module):
     """
     Base class for a Bayesian layer. It is used to calculate the KL divergence.
     """
-    def __init__(self, prior_mu=0, prior_sigma=1.0):
+    def __init__(self, prior_mu=0, prior_sigma=0.10):
         super().__init__()
         self.prior_mu = prior_mu
         self.prior_sigma = prior_sigma

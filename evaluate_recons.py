@@ -234,12 +234,22 @@ def main():
                 ]
                 t = np.array([t[2], t[0], t[1]])
 
-            # create circular mask with radius 225
-            mask = np.zeros(gt.shape[:2], dtype=bool)
-            center = (gt.shape[0] // 2, gt.shape[1] // 2)
-            radius = 225
-            y, x = np.ogrid[:gt.shape[0], :gt.shape[1]]
-            mask[(x - center[0]) ** 2 + (y - center[1]) ** 2 <= radius ** 2] = True
+            # mask as a cylinder through the volume:
+            #   - circular in the index view
+            #   - straight band in height/width views
+            if view == "index":
+                mask = np.zeros(gt.shape[:2], dtype=bool)
+                center0 = gt.shape[0] // 2
+                center1 = gt.shape[1] // 2
+                radius = 225
+                y, x = np.ogrid[: gt.shape[0], : gt.shape[1]]
+                mask[(y - center0) ** 2 + (x - center1) ** 2 <= radius ** 2] = True
+            else:
+                mask = np.zeros(gt.shape[:2], dtype=bool)
+                center1 = gt.shape[1] // 2
+                radius = 225
+                # band across axis-1 (width in height view, height in width view)
+                mask[:, center1 - radius : center1 + radius + 1] = True
             tumor_slice = int(t[2])
 
             # adjust SSIM window size per scan_type & view

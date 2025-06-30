@@ -1206,8 +1206,8 @@ class IResNetBBB(nn.Module):
 
         self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
 
-        self.conv1 = BayesianConvBlock(ch_in=img_ch, ch_out=64)
-        self.conv1_extra = BayesianSingleConv(ch_in=64, ch_out=64)
+        self.conv1 = ConvBlock(ch_in=img_ch, ch_out=64)
+        self.conv1_extra = SingleConv(ch_in=64, ch_out=64)
         self.conv2 = BayesianConvBlock(ch_in=64, ch_out=128)
         self.conv3 = BayesianConvBlock(ch_in=128, ch_out=256)
         self.conv4 = BayesianConvBlock(ch_in=256, ch_out=512)
@@ -1221,11 +1221,11 @@ class IResNetBBB(nn.Module):
         self.up_conv4 = BayesianConvBlock(ch_in=512, ch_out=256)
         self.up3 = BayesianUpConvBlock(ch_in=256, ch_out=128, up_conv=up_conv)
         self.up_conv3 = BayesianConvBlock(ch_in=256, ch_out=128)
-        self.up2 = BayesianUpConvBlock(ch_in=128, ch_out=64, up_conv=up_conv)
-        self.up_conv2 = BayesianConvBlock(ch_in=128, ch_out=64)
+        self.up2 = UpConvBlock(ch_in=128, ch_out=64, up_conv=up_conv)
+        self.up_conv2 = ConvBlock(ch_in=128, ch_out=64)
 
         # Final layer is often kept deterministic, but can be Bayesian as well
-        self.conv_1x1 = BayesianConv2d(64, output_ch, kernel_size=1, stride=1, padding=0)
+        self.conv_1x1 = nn.Conv2d(64, output_ch, kernel_size=1, stride=1, padding=0)
 
     def forward(self, input):
         # encoding path

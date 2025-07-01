@@ -5,9 +5,9 @@ PD_settings:
   training_app: "train_app_MK6_numpy.TrainingApp"
   epochs: 20 # Number of epochs for PD training
   learning_rate: 1e-3  # Either float or list (if the list is shorter than the number of epochs, the last value is used for the rest of the epochs)
-  network_name: "IResNet"  # Network name for PD CNN (see network_instance.py)
-  network_kwargs: {}  # Additional keyword arguments for the network (e.g., {'p': 0.5} for dropout)
-  model_version: "MK7" # Unique model name (note: you can have the same name for an image domain model)
+  network_name: "IResNetBBB"  # Network name for PD CNN (see network_instance.py)
+  network_kwargs: {'prior_mu': 0, 'prior_sigma': 1e-2}  # Additional keyword arguments for the network (e.g., {'p': 0.5} for dropout, or 'prior_mu' and/or 'prior_sigma' for BBB)
+  model_version: "MK7_BBB_NEW_1e-2_priorsigma1e-2" # Unique model name (note: you can have the same name for an image domain model)
   batch_size: 8 # Batch size for PD training
   optimizer: "NAdam" # Optimizer for PD training (SGD, Adam, or NAdam)
   num_workers: 0 # Number of workers for data loading (0 means only the main process will load data)
@@ -18,13 +18,15 @@ PD_settings:
   momentum_decay_NAdam: 4e-4  # Only for NAdam, otherwise ignored
   momentum_SGD: 0.99  # Only for SGD, otherwise ignored
   weight_decay_SGD: 1e-8  # Only for SGD, otherwise ignored
-  checkpoint_save_step: 5  # Save checkpoint every N epochs
+  checkpoint_save_step: 1  # Save checkpoint every N epochs
   tensor_board: false  # Whether to use TensorBoard for PD training
   tensor_board_comment: ""  # If using TensorBoard, a comment suffix
-  train_at_inference: false  # Whether to put the model in training mode during inference (e.g., for MC dropout)
+  train_at_inference: true  # Whether to put the model in training mode during inference (e.g., for MC dropout)
   ensemble_size: 1 # Number of models to train
   scan_type: "HF" # Scan type for PD training (HF or FF) -- make sure it matches the aggregated data
-  passthrough_count: 1 #  The number of passthroughs to use when creating outputs for the model (for deterministic models 1, for probabilistic you'll probably want >1)
+  passthrough_count: 50 #  The number of passthroughs to use when creating outputs for the model (for deterministic models 1, for probabilistic you'll probably want >1)
+  is_bayesian: true # Whether the model is BBB
+  beta_BBB: 1e-2 # Only for BBB, constant factor for the KL divergence term (≠ 1 for tempered Bayesian)
 
   # Ignore -- not used for PD training (just have to be defined)
   input_type: null
@@ -37,7 +39,7 @@ ID_settings:
   learning_rate: 1e-3
   network_name: "IResNet"
   network_kwargs: {}
-  model_version: "MK7"
+  model_version: "MK7_01"
   batch_size: 8
   optimizer: "NAdam"
   num_workers: 0
@@ -48,12 +50,14 @@ ID_settings:
   momentum_decay_NAdam: 4e-4
   momentum_SGD: 0.99
   weight_decay_SGD: 1e-8
-  checkpoint_save_step: 10
+  checkpoint_save_step: 1
   tensor_board: false
   tensor_board_comment: ""
   train_at_inference: false
   ensemble_size: 1
   scan_type: "HF"
-  input_type: "MK7" # Input type for ID training, i.e., PL or some trained & reconstructed PD model name
+  input_type: "MK7_01" # Input type for ID training, i.e., PL or some trained & reconstructed PD model name
   input_type_match_ensemble: true # When training an ensemble, whether the input type should have an extra identifier (e.g., _01) which matches the ID model name
   passthrough_count: 1
+  is_bayesian: false
+  beta_BBB: 1e-2

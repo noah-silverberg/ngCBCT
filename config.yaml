@@ -1,13 +1,13 @@
 
 # PD Training settings
 PD_settings:
-  training: true # Whether to train the PD model
+  training: false # Whether to train the PD model
   training_app: "train_app_MK6_numpy.TrainingApp"
   epochs: 20 # Number of epochs for PD training
   learning_rate: 1e-3  # Either float or list (if the list is shorter than the number of epochs, the last value is used for the rest of the epochs)
-  network_name: "IResNetBBB"  # Network name for PD CNN (see network_instance.py)
-  network_kwargs: {'prior_mu': 0, 'prior_sigma': 1e-2}  # Additional keyword arguments for the network (e.g., {'p': 0.5} for dropout, or 'prior_mu' and/or 'prior_sigma' for BBB)
-  model_version: "MK7_BBB_NEW_1e-2_priorsigma1e-2" # Unique model name (note: you can have the same name for an image domain model)
+  network_name: "IResNetDropout"  # Network name for PD CNN (see network_instance.py)
+  network_kwargs: {'p' : 0.5}  # Additional keyword arguments for the network (e.g., {'p': 0.5} for dropout, or 'prior_mu' and/or 'prior_sigma' for BBB)
+  model_version: "MK7_MCDROPOUT_50_pct_NEW" # Unique model name (note: you can have the same name for an image domain model)
   batch_size: 8 # Batch size for PD training
   optimizer: "NAdam" # Optimizer for PD training (SGD, Adam, or NAdam)
   num_workers: 0 # Number of workers for data loading (0 means only the main process will load data)
@@ -24,10 +24,20 @@ PD_settings:
   train_at_inference: true  # Whether to put the model in training mode during inference (e.g., for MC dropout)
   ensemble_size: 1 # Number of models to train
   scan_type: "HF" # Scan type for PD training (HF or FF) -- make sure it matches the aggregated data
-  passthrough_count: 50 #  The number of passthroughs to use when creating outputs for the model (for deterministic models 1, for probabilistic you'll probably want >1)
-  is_bayesian: true # Whether the model is BBB
+  passthrough_count: 10 #  The number of passthroughs to use when creating outputs for the model (for deterministic models 1, for probabilistic you'll probably want >1)
+  is_bayesian: false # Whether the model is BBB
   beta_BBB: 1e-2 # Only for BBB, constant factor for the KL divergence term (≠ 1 for tempered Bayesian)
 
+  swag_enabled: true
+  swag_model_version: 'MK7_01' # The model version to load
+  swag_start_checkpoint_epoch: 1 # The checkpoint epoch to load from that model
+  swag_burn_in_epochs: 2 # Epochs to fine-tune before starting SWA (can be 0)
+  swag_epochs: 10 # Number of epochs to perform SWA
+  swag_lr: 0.0001 # Constant learning rate for SWA epochs
+  swag_update_freq: 1 # Update SWA model every N batches
+  swag_cov_mat_rank: 20 # Rank of the SWAG covariance matrix
+  swag_optimizer: "SGD" # Options: "keep" or "SGD"
+    
   # Ignore -- not used for PD training (just have to be defined)
   input_type: null
 
@@ -39,7 +49,7 @@ ID_settings:
   learning_rate: 1e-3
   network_name: "IResNet"
   network_kwargs: {}
-  model_version: "MK7_01"
+  model_version: "MK7_03"
   batch_size: 8
   optimizer: "NAdam"
   num_workers: 0
@@ -56,8 +66,18 @@ ID_settings:
   train_at_inference: false
   ensemble_size: 1
   scan_type: "HF"
-  input_type: "MK7_01" # Input type for ID training, i.e., PL or some trained & reconstructed PD model name
+  input_type: "MK7_03" # Input type for ID training, i.e., PL or some trained & reconstructed PD model name
   input_type_match_ensemble: true # When training an ensemble, whether the input type should have an extra identifier (e.g., _01) which matches the ID model name
   passthrough_count: 1
   is_bayesian: false
   beta_BBB: 1e-2
+
+  swag_enabled: true
+  swag_model_version: 'MK7_01' # The model version to load
+  swag_start_checkpoint_epoch: 1 # The checkpoint epoch to load from that model
+  swag_burn_in_epochs: 2 # Epochs to fine-tune before starting SWA (can be 0)
+  swag_epochs: 10 # Number of epochs to perform SWA
+  swag_lr: 0.0001 # Constant learning rate for SWA epochs
+  swag_update_freq: 1 # Update SWA model every N batches
+  swag_cov_mat_rank: 20 # Rank of the SWAG covariance matrix
+  swag_optimizer: "SGD" # Options: "keep" or "SGD"

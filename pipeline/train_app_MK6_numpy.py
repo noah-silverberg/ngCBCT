@@ -7,6 +7,8 @@ import datetime
 import time
 import gc
 from torch.utils.tensorboard import SummaryWriter
+from torch.optim.swa_utils import AveragedModel
+import torch.optim as optim
 import torch
 import torch.nn as nn
 from torch.optim import SGD, Adam, NAdam
@@ -177,6 +179,7 @@ class TrainingApp:
         self.config["domain"] = domain
         self.files = files
         self.is_bayesian = self.config["is_bayesian"]
+        self.swag_enabled = self.config["swag_enabled"]
 
         # We need to correct some of the config settings
         # since some values are not read correctly
@@ -218,16 +221,56 @@ class TrainingApp:
         # Initialize model, loss, and optimizer
         self.model = init_model(self.config)
         self.criterion = init_loss(self.config, self.is_bayesian)
-        self.optimizer, self.scheduler = init_optimizer(self.config, self.model)
+        
+        # SWAG Initialization
+        if self.swag_enabled:
+            logger.info("SWAG training is enabled. Loading base model checkpoint.")
+            
+            # 1. Load the specified checkpoint
+            start_model_version = self.config['swag_start_model_version']
+            start_epoch = self.config['swag_start_checkpoint_epoch']
+            
+            checkpoint_path = self.files.get_model_filepath(
+                model_version=start_model_version,
+                domain=self.config["domain"],
+                checkpoint=start_epoch,
+                ensure_exists=False
+            )
+            
+            checkpoint = torch.load(checkpoint_path, map_location=device)
+            self.model.load_state_dict(checkpoint['state_dict'])
+            logger.info(f"Loaded checkpoint from epoch {checkpoint['epoch']} of model '{start_model_version}'.")
 
-        # Resume from checkpoint if provided
-        self.start_epoch = 1
-        if (
-            checkpoint_epoch is not None
-            and optimizer_state is not None
-            and network_state is not None
-        ):
-            self._load_checkpoint(checkpoint_epoch, optimizer_state, network_state)
+            # 2. Set up the SWAG optimizer
+            optimizer_choice = self.config['swag_optimizer']
+            # TODO deal with this scheduler
+            # Use a dummy scheduler as the main loop expects one. It won't be used.
+            _, self.scheduler = init_optimizer(self.config, self.model) 
+            if optimizer_choice == 'keep':
+                logger.info("Keeping optimizer from loaded checkpoint.")
+                self.optimizer, _ = init_optimizer(self.config, self.model)
+                self.optimizer.load_state_dict(checkpoint['optimizer'])
+            elif optimizer_choice == 'SGD':
+                logger.info("Initializing new SGD optimizer for SWAG.")
+                self.optimizer = optim.SGD(self.model.parameters(), lr=self.config['swag_lr'])
+            else:
+                raise ValueError(f"Unsupported SWAG optimizer: {optimizer_choice}. Supported optimizers are: 'keep', 'SGD'.")
+
+            # 3. Initialize the AveragedModel for SWA
+            self.swag_model = AveragedModel(self.model)
+            self.start_epoch = 1
+            self.epochs = self.config['swag_burn_in_epochs'] + self.config['swag_epochs']
+
+        else: # Standard (Non-SWAG) Initialization
+            self.optimizer, self.scheduler = init_optimizer(self.config, self.model)
+            # Resume from checkpoint if provided
+            self.start_epoch = 1
+            if (
+                checkpoint_epoch is not None
+                and optimizer_state is not None
+                and network_state is not None
+            ):
+                self._load_checkpoint(checkpoint_epoch, optimizer_state, network_state)
 
     def _load_checkpoint(
         self, checkpoint_epoch: int, optimizer_state: dict, network_state: dict
@@ -254,8 +297,6 @@ class TrainingApp:
         train_dl = init_dataloader(self.config, self.files, "TRAIN", self.config["input_type"], self.config['domain'])
         val_dl = init_dataloader(self.config, self.files, "VALIDATION", self.config["input_type"], self.config['domain'])
 
-        num_train_batches = len(train_dl)
-
         # Initialize the tensorboard writers if enabled
         if self.config["tensor_board"]:
             self.trn_writer, self.val_writer = init_tensorboard_writers(
@@ -275,11 +316,34 @@ class TrainingApp:
 
         # Train for the chosen number of epochs
         logger.info("STARTING TRAINING...")
+
+        if self.swag_enabled:
+            total_epochs = self.epochs
+        else:
+            total_epochs = self.config["epochs"]
+
         # NOTE: epoch_ndx is 1-indexed!!
-        for epoch_ndx in range(self.start_epoch, self.config["epochs"] + 1):
-            logger.debug(
-                f"Learning rate is {self.scheduler.get_last_lr()[0]} at epoch {epoch_ndx}."
-            )
+        for epoch_ndx in range(self.start_epoch, total_epochs + 1):
+            
+            # SWAG learning rate and phase logic
+            is_swa_phase = False
+            if self.swag_enabled:
+                burn_in_epochs = self.config['swag_burn_in_epochs']
+                if epoch_ndx > burn_in_epochs:
+                    is_swa_phase = True
+                    # In SWA phase, use the constant SWAG learning rate
+                    # TODO again is this the best way to do the optimizer/scheduler?
+                    for param_group in self.optimizer.param_groups:
+                        param_group['lr'] = self.config['swag_lr']
+                    desc_phase = f"SWA Epoch {epoch_ndx - burn_in_epochs}/{total_epochs - burn_in_epochs}"
+                else:
+                    desc_phase = f"Burn-in Epoch {epoch_ndx}/{burn_in_epochs}"
+            else: # Standard training
+                logger.debug(
+                    f"Learning rate is {self.scheduler.get_last_lr()[0]} at epoch {epoch_ndx}."
+                )
+                desc_phase = f"Epoch {epoch_ndx} Training"
+            
 
             # Set the model to training mode
             self.model.train()
@@ -292,7 +356,7 @@ class TrainingApp:
             epoch_train_start_time = time.time()
 
             # Loop throught the batches in the training dataloader
-            for batch_idx, train_set in enumerate(tqdm(train_dl, desc=f"Epoch {epoch_ndx} Training")):
+            for batch_idx, train_set in enumerate(tqdm(train_dl, desc=desc_phase)):
 
                 # Extract the input and ground truth (they are already on GPU)
                 train_inputs = train_set[0].float()
@@ -321,6 +385,10 @@ class TrainingApp:
 
                 # Parameter update
                 self.optimizer.step()
+
+                # Update SWAG model parameters if in SWA phase
+                if is_swa_phase and batch_idx % self.config['swag_update_freq'] == 0:
+                    self.swag_model.update_parameters(self.model)
 
                 # Update epoch training loss
                 epoch_total_train_loss += train_loss.item() * train_inputs.size(0)
@@ -398,39 +466,42 @@ class TrainingApp:
                         time.time() - epoch_val_start_time,
                     )
                 )
+            
+            # Skip checkpoint saving during SWAG training
+            if not self.swag_enabled:
+                if (
+                    epoch_ndx % self.config["checkpoint_save_step"] == 0
+                    or epoch_ndx == self.config["epochs"]
+                ):
+                    save_path = self.files.get_model_filepath(self.config["model_version"], self.config["domain"], checkpoint=epoch_ndx)
+                    torch.save(
+                        {
+                            "epoch": epoch_ndx,
+                            "state_dict": self.model.state_dict(),
+                            "optimizer": self.optimizer.state_dict(),
+                        },
+                        save_path,
+                    )
+                    logger.info(
+                        "Checkpoint saved at epoch {}: {}\n".format(epoch_ndx, save_path)
+                    )
 
-            # Save model if needed (either at checkpoint or at end of training)
-            if (
-                epoch_ndx % self.config["checkpoint_save_step"] == 0
-                or epoch_ndx == self.config["epochs"]
-            ):
-                save_path = self.files.get_model_filepath(self.config["model_version"], self.config["domain"], checkpoint=epoch_ndx)
-                torch.save(
-                    {
-                        "epoch": epoch_ndx,
-                        "state_dict": self.model.state_dict(),
-                        "optimizer": self.optimizer.state_dict(),
-                    },
-                    save_path,
-                )
-                logger.info(
-                    "Checkpoint saved at epoch {}: {}\n".format(epoch_ndx, save_path)
-                )
-
-                # Delete most recent checkpoint to save space
-                if epoch_ndx > self.config["checkpoint_save_step"]:
-                    old_save_path = self.files.get_model_filepath(self.config["model_version"], self.config["domain"], checkpoint=epoch_ndx - self.config["checkpoint_save_step"])
-                    if os.path.exists(old_save_path):
-                        os.remove(old_save_path)
-                        logger.debug(
-                            "Old checkpoint removed from epoch {}: {}".format(
-                                epoch_ndx - self.config["checkpoint_save_step"],
-                                old_save_path,
+                    # Delete most recent checkpoint to save space
+                    if epoch_ndx > self.config["checkpoint_save_step"]:
+                        old_save_path = self.files.get_model_filepath(self.config["model_version"], self.config["domain"], checkpoint=epoch_ndx - self.config["checkpoint_save_step"])
+                        if os.path.exists(old_save_path):
+                            os.remove(old_save_path)
+                            logger.debug(
+                                "Old checkpoint removed from epoch {}: {}".format(
+                                    epoch_ndx - self.config["checkpoint_save_step"],
+                                    old_save_path,
+                                )
                             )
-                        )
 
-            # Update the learning rate
-            self.scheduler.step()
+
+            # Update the learning rate (only for standard training)
+            if not self.swag_enabled:
+                self.scheduler.step()
 
         logger.info(
             "Training finished, took {:.2f}s\n".format(
@@ -440,13 +511,22 @@ class TrainingApp:
 
         # Training is done
         logger.info("Saving training results...")
-        # Save the final model state
-        model_path = self.files.get_model_filepath(self.config["model_version"], self.config["domain"])
-        torch.save(
-            self.model.state_dict(),
-            model_path,
-        )
-        logger.info(f"Model saved to {model_path}")
+        if self.swag_enabled:
+            # logger.info("SWAG training complete. Updating batch norm statistics.")
+            # torch.optim.swa_utils.update_bn(train_dl, self.swag_model, device=device)
+
+            save_path = self.files.get_model_filepath(self.config["model_version"], self.config["domain"])
+            logger.info(f"Saving final SWAG model to: {save_path}")
+            torch.save(self.swag_model.state_dict(), save_path)
+        else:
+            # Save the final model state
+            model_path = self.files.get_model_filepath(self.config["model_version"], self.config["domain"])
+            torch.save(
+                self.model.state_dict(),
+                model_path,
+            )
+            logger.info(f"Model saved to {model_path}")
+        
         # Save the training and validation loss values
         train_loss_path = self.files.get_train_loss_filepath(self.config["model_version"], self.config["domain"])
         torch.save(

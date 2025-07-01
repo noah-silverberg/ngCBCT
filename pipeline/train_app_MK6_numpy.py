@@ -173,7 +173,7 @@ class TrainingApp:
 
         self.config["domain"] = domain
         self.files = files
-        self.is_bayesian = "IResNetBBB" == self.config["network_name"]
+        self.is_bayesian = self.config["is_bayesian"]
 
         # We need to correct some of the config settings
         # since some values are not read correctly
@@ -200,12 +200,8 @@ class TrainingApp:
             self.config["weight_decay_SGD"] = ast.literal_eval(
                 self.config["weight_decay_SGD"]
             )
-
-        # Add default settings for BBB if not present in config
-        if self.is_bayesian:
-            self.config.setdefault('beta_type', 'Blundell')
-            logger.info(f"Bayesian model detected. Using beta type: {self.config['beta_type']}")
-
+        if isinstance(self.config["beta_BBB"], str):
+            self.config["beta_BBB"] = ast.literal_eval(self.config["beta_BBB"])
 
         # Set logging level
         if DEBUG:
@@ -238,27 +234,6 @@ class TrainingApp:
         self.optimizer.load_state_dict(optimizer_state)
         self.start_epoch = checkpoint_epoch + 1  # Resume from the next epoch
         logger.info(f"Resumed training from checkpoint: Epoch {checkpoint_epoch}")
-        
-    def _calculate_beta(self, batch_idx, epoch_ndx, num_batches):
-        """Calculates the beta value for weighting the KL divergence term."""
-        beta_type = self.config.get('beta_type', 'Standard')
-
-        if epoch_ndx > 1: # After the first epoch, beta is always 1
-            return 1.0
-
-        if beta_type == 'Blundell':
-            # Formula from "Weight Uncertainty in Neural Networks" (Blundell et al., 2015)
-            # This anneals beta from a small value to 1 over the first epoch.
-            beta = (2**(num_batches - batch_idx - 1)) / (2**num_batches - 1)
-        elif beta_type == 'Soenderby':
-            # Ramp-up beta over first half of the batches in the first epoch
-            beta = min(1.0, (batch_idx + 1) / (num_batches * 0.5))
-        elif beta_type == 'Standard':
-            beta = 1.0
-        else:
-            logger.warning(f"Unknown beta type: {beta_type}. Defaulting to 'Standard' (beta=1.0).")
-            beta = 1.0
-        return beta
 
 
     def main(self):
@@ -326,9 +301,10 @@ class TrainingApp:
 
                 if self.is_bayesian:
                     reconstruction_loss = self.criterion(train_outputs, train_truths)
-                    kl_loss = self.model.kl_divergence()
-                    beta = self._calculate_beta(batch_idx, epoch_ndx, num_train_batches)
-                    train_loss = reconstruction_loss + beta * kl_loss
+                    kl_loss = self.model.kl_divergence() / len(train_dl.dataset)
+                    train_loss = reconstruction_loss + self.config['beta_BBB'] * kl_loss
+                    if batch_idx % 100 == 0:
+                        logger.debug(f"Epoch {epoch_ndx}, Batch {batch_idx}: Total Loss: {train_loss.item()}, Reconstruction Loss: {reconstruction_loss.item()}, KL Loss: {kl_loss.item()}, Beta: {self.config['beta_BBB']}")
                 else:
                     train_loss = self.criterion(train_outputs, train_truths)
 
@@ -396,9 +372,8 @@ class TrainingApp:
 
                     if self.is_bayesian:
                         reconstruction_loss = self.criterion(val_outputs, val_truths)
-                        kl_loss = self.model.kl_divergence()
-                        # For validation, beta is typically 1.0 to get the full ELBO loss
-                        val_loss = reconstruction_loss + kl_loss
+                        kl_loss = self.model.kl_divergence() / len(val_dl.dataset)
+                        val_loss = reconstruction_loss + self.config['beta_BBB'] * kl_loss
                     else:
                         val_loss = self.criterion(val_outputs, val_truths)
                     

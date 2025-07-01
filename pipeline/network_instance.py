@@ -1043,7 +1043,7 @@ class BayesianLayer(nn.Module):
     """
     Base class for a Bayesian layer. It is used to calculate the KL divergence.
     """
-    def __init__(self, prior_mu=0, prior_sigma=0.10):
+    def __init__(self, prior_mu=0, prior_sigma=1e-2):
         super().__init__()
         self.prior_mu = prior_mu
         self.prior_sigma = prior_sigma
@@ -1069,12 +1069,15 @@ class BayesianLayer(nn.Module):
               - 0.5)
         return kl.sum()
 
+    def extra_repr(self):
+        return f'prior_mu={self.prior_mu}, prior_sigma={self.prior_sigma}'
+
 class BayesianConv2d(BayesianLayer):
     """
     Bayesian Convolutional Layer using the reparameterization trick.
     """
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, bias=True):
-        super().__init__()
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, bias=True, prior_mu=0, prior_sigma=1e-2):
+        super().__init__(prior_mu=prior_mu, prior_sigma=prior_sigma)
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.kernel_size = (kernel_size, kernel_size)
@@ -1099,12 +1102,12 @@ class BayesianConv2d(BayesianLayer):
         # Initialization similar to nn.Conv2d
         nn.init.kaiming_uniform_(self.weight_mu, a=math.sqrt(5))
         # Initialize rho to a small value for low initial variance
-        nn.init.constant_(self.weight_rho, -3.0) 
+        nn.init.constant_(self.weight_rho, -5.0) 
         if self.has_bias:
             fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight_mu)
             bound = 1 / math.sqrt(fan_in)
             nn.init.uniform_(self.bias_mu, -bound, bound)
-            nn.init.constant_(self.bias_rho, -3.0)
+            nn.init.constant_(self.bias_rho, -5.0)
 
     def forward(self, x):
         # Sample weights and bias from their posteriors using the reparameterization trick
@@ -1130,13 +1133,18 @@ class BayesianConv2d(BayesianLayer):
         # Perform the convolution with the sampled weights
         return F.conv2d(x, weight, bias, self.stride, self.padding)
 
+    def extra_repr(self):
+        base = f'in_channels={self.in_channels}, out_channels={self.out_channels}, kernel_size={self.kernel_size}, stride={self.stride}, padding={self.padding}, bias={self.has_bias}'
+        prior = f', prior_mu={self.prior_mu}, prior_sigma={self.prior_sigma}'
+        return base + prior
+
 # --- Bayesian versions of the building blocks ---
 
 class BayesianSingleConv(nn.Module):
-    def __init__(self, ch_in, ch_out):
+    def __init__(self, ch_in, ch_out, prior_mu=0, prior_sigma=1e-2):
         super(BayesianSingleConv, self).__init__()
         self.conv = nn.Sequential(
-            BayesianConv2d(ch_in, ch_out, kernel_size=3, stride=1, padding=1, bias=True),
+            BayesianConv2d(ch_in, ch_out, kernel_size=3, stride=1, padding=1, bias=True, prior_mu=prior_mu, prior_sigma=prior_sigma),
             nn.InstanceNorm2d(ch_out),
             nn.ReLU(inplace=True)
         )
@@ -1144,13 +1152,13 @@ class BayesianSingleConv(nn.Module):
         return self.conv(x)
 
 class BayesianConvBlock(nn.Module):
-    def __init__(self, ch_in, ch_out):
+    def __init__(self, ch_in, ch_out, prior_mu=0, prior_sigma=1e-2):
         super(BayesianConvBlock, self).__init__()
         self.conv = nn.Sequential(
-            BayesianConv2d(ch_in, ch_out, kernel_size=3, stride=1, padding=1, bias=True),
+            BayesianConv2d(ch_in, ch_out, kernel_size=3, stride=1, padding=1, bias=True, prior_mu=prior_mu, prior_sigma=prior_sigma),
             nn.InstanceNorm2d(ch_out),
             nn.ReLU(inplace=True),
-            BayesianConv2d(ch_out, ch_out, kernel_size=3, stride=1, padding=1, bias=True),
+            BayesianConv2d(ch_out, ch_out, kernel_size=3, stride=1, padding=1, bias=True, prior_mu=prior_mu, prior_sigma=prior_sigma),
             nn.InstanceNorm2d(ch_out),
             nn.ReLU(inplace=True)
         )
@@ -1160,7 +1168,7 @@ class BayesianConvBlock(nn.Module):
 class BayesianUpConvBlock(nn.Module):
     # NOTE: Using deterministic ConvTranspose2d as it's typically not a major source of uncertainty
     # and Bayesian ConvTranspose2d can be complex to implement correctly.
-    def __init__(self, ch_in, ch_out, up_conv):
+    def __init__(self, ch_in, ch_out, up_conv, prior_mu=0, prior_sigma=1e-2):
         super(BayesianUpConvBlock, self).__init__()
         if up_conv:
             self.up = nn.Sequential(
@@ -1172,7 +1180,7 @@ class BayesianUpConvBlock(nn.Module):
             # Upsample is deterministic, but the following conv should be Bayesian
             self.up = nn.Sequential(
                 nn.Upsample(scale_factor=2),
-                BayesianConv2d(ch_in, ch_out, kernel_size=3, stride=1, padding=1, bias=True),
+                BayesianConv2d(ch_in, ch_out, kernel_size=3, stride=1, padding=1, bias=True, prior_mu=prior_mu, prior_sigma=prior_sigma),
                 nn.InstanceNorm2d(ch_out),
                 nn.ReLU(inplace=True)
             )
@@ -1180,15 +1188,15 @@ class BayesianUpConvBlock(nn.Module):
         return self.up(x)
         
 class BayesianResidualBlock_mod(nn.Module):
-    def __init__(self, ch_in):
+    def __init__(self, ch_in, prior_mu=0, prior_sigma=1e-2):
         super(BayesianResidualBlock_mod, self).__init__()
         self.block = nn.Sequential(
             nn.ReflectionPad2d(1),
-            BayesianConv2d(ch_in, ch_in, 3),
+            BayesianConv2d(ch_in, ch_in, 3, prior_mu=prior_mu, prior_sigma=prior_sigma),
             nn.InstanceNorm2d(ch_in),
             nn.ReLU(inplace=True),
             nn.ReflectionPad2d(1),
-            BayesianConv2d(ch_in, ch_in, 3),
+            BayesianConv2d(ch_in, ch_in, 3, prior_mu=prior_mu, prior_sigma=prior_sigma),
             nn.InstanceNorm2d(ch_in)
         )
         self.relu = nn.ReLU(inplace=True)
@@ -1197,35 +1205,41 @@ class BayesianResidualBlock_mod(nn.Module):
         y1 = self.relu(y)
         return y1
 
+    def extra_repr(self):
+        # Try to extract prior_mu and prior_sigma from the first BayesianConv2d
+        for m in self.block:
+            if isinstance(m, BayesianConv2d):
+                return f'prior_mu={m.prior_mu}, prior_sigma={m.prior_sigma}'
+        return ''
 
 class IResNetBBB(nn.Module):
-    def __init__(self, img_ch=1, output_ch=1):
+    def __init__(self, img_ch=1, output_ch=1, prior_mu=0, prior_sigma=1e-2):
         super(IResNetBBB, self).__init__()
 
         up_conv = True
 
         self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
 
-        self.conv1 = BayesianConvBlock(ch_in=img_ch, ch_out=64)
-        self.conv1_extra = BayesianSingleConv(ch_in=64, ch_out=64)
-        self.conv2 = BayesianConvBlock(ch_in=64, ch_out=128)
-        self.conv3 = BayesianConvBlock(ch_in=128, ch_out=256)
-        self.conv4 = BayesianConvBlock(ch_in=256, ch_out=512)
-        self.conv5 = BayesianConvBlock(ch_in=512, ch_out=1024)
+        self.conv1 = ConvBlock(ch_in=img_ch, ch_out=64)
+        self.conv1_extra = SingleConv(ch_in=64, ch_out=64)
+        self.conv2 = BayesianConvBlock(ch_in=64, ch_out=128, prior_mu=prior_mu, prior_sigma=prior_sigma)
+        self.conv3 = BayesianConvBlock(ch_in=128, ch_out=256, prior_mu=prior_mu, prior_sigma=prior_sigma)
+        self.conv4 = BayesianConvBlock(ch_in=256, ch_out=512, prior_mu=prior_mu, prior_sigma=prior_sigma)
+        self.conv5 = BayesianConvBlock(ch_in=512, ch_out=1024, prior_mu=prior_mu, prior_sigma=prior_sigma)
 
-        self.resnet = BayesianResidualBlock_mod(ch_in=1024)
+        self.resnet = BayesianResidualBlock_mod(ch_in=1024, prior_mu=prior_mu, prior_sigma=prior_sigma)
 
-        self.up5 = BayesianUpConvBlock(ch_in=1024, ch_out=512, up_conv=up_conv)
-        self.up_conv5 = BayesianConvBlock(ch_in=1024, ch_out=512)
-        self.up4 = BayesianUpConvBlock(ch_in=512, ch_out=256, up_conv=up_conv)
-        self.up_conv4 = BayesianConvBlock(ch_in=512, ch_out=256)
-        self.up3 = BayesianUpConvBlock(ch_in=256, ch_out=128, up_conv=up_conv)
-        self.up_conv3 = BayesianConvBlock(ch_in=256, ch_out=128)
-        self.up2 = BayesianUpConvBlock(ch_in=128, ch_out=64, up_conv=up_conv)
-        self.up_conv2 = BayesianConvBlock(ch_in=128, ch_out=64)
+        self.up5 = BayesianUpConvBlock(ch_in=1024, ch_out=512, up_conv=up_conv, prior_mu=prior_mu, prior_sigma=prior_sigma)
+        self.up_conv5 = BayesianConvBlock(ch_in=1024, ch_out=512, prior_mu=prior_mu, prior_sigma=prior_sigma)
+        self.up4 = BayesianUpConvBlock(ch_in=512, ch_out=256, up_conv=up_conv, prior_mu=prior_mu, prior_sigma=prior_sigma)
+        self.up_conv4 = BayesianConvBlock(ch_in=512, ch_out=256, prior_mu=prior_mu, prior_sigma=prior_sigma)
+        self.up3 = BayesianUpConvBlock(ch_in=256, ch_out=128, up_conv=up_conv, prior_mu=prior_mu, prior_sigma=prior_sigma)
+        self.up_conv3 = BayesianConvBlock(ch_in=256, ch_out=128, prior_mu=prior_mu, prior_sigma=prior_sigma)
+        self.up2 = UpConvBlock(ch_in=128, ch_out=64, up_conv=up_conv)
+        self.up_conv2 = ConvBlock(ch_in=128, ch_out=64)
 
         # Final layer is often kept deterministic, but can be Bayesian as well
-        self.conv_1x1 = BayesianConv2d(64, output_ch, kernel_size=1, stride=1, padding=0)
+        self.conv_1x1 = nn.Conv2d(64, output_ch, kernel_size=1, stride=1, padding=0)
 
     def forward(self, input):
         # encoding path
@@ -1289,3 +1303,15 @@ class IResNetBBB(nn.Module):
                 # Here we just sum them up.
                 total_kl += module.kl_divergence
         return total_kl
+
+    def extra_repr(self):
+        # Show prior_mu and prior_sigma for all Bayesian layers in the model
+        priors = []
+        for name, module in self.named_modules():
+            if isinstance(module, BayesianLayer):
+                priors.append(f"{name}: prior_mu={module.prior_mu}, prior_sigma={module.prior_sigma}")
+        if priors:
+            return "Bayesian Priors:\n  " + "\n  ".join(priors)
+        return ""
+    
+print(IResNetBBB())

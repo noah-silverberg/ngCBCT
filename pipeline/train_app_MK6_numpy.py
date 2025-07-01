@@ -44,8 +44,11 @@ def init_model(config: dict):
     return model
 
 
-def init_loss(config: dict):
-    loss = nn.SmoothL1Loss()
+def init_loss(config: dict, is_bayesian: bool):
+    if is_bayesian:
+        loss = nn.SmoothL1Loss(reduction='sum')
+    else:
+        loss = nn.SmoothL1Loss(reduction='mean')
     return loss
 
 
@@ -214,7 +217,7 @@ class TrainingApp:
 
         # Initialize model, loss, and optimizer
         self.model = init_model(self.config)
-        self.criterion = init_loss(self.config)
+        self.criterion = init_loss(self.config, self.is_bayesian)
         self.optimizer, self.scheduler = init_optimizer(self.config, self.model)
 
         # Resume from checkpoint if provided
@@ -301,9 +304,9 @@ class TrainingApp:
 
                 if self.is_bayesian:
                     reconstruction_loss = self.criterion(train_outputs, train_truths)
-                    kl_loss = self.model.kl_divergence() / len(train_dl.dataset)
+                    kl_loss = self.model.kl_divergence() / len(train_dl)
                     train_loss = reconstruction_loss + self.config['beta_BBB'] * kl_loss
-                    if batch_idx % 100 == 0:
+                    if batch_idx % 500 == 0:
                         logger.debug(f"Epoch {epoch_ndx}, Batch {batch_idx}: Total Loss: {train_loss.item()}, Reconstruction Loss: {reconstruction_loss.item()}, KL Loss: {kl_loss.item()}, Beta: {self.config['beta_BBB']}")
                 else:
                     train_loss = self.criterion(train_outputs, train_truths)
@@ -372,7 +375,7 @@ class TrainingApp:
 
                     if self.is_bayesian:
                         reconstruction_loss = self.criterion(val_outputs, val_truths)
-                        kl_loss = self.model.kl_divergence() / len(val_dl.dataset)
+                        kl_loss = self.model.kl_divergence() / len(val_dl)
                         val_loss = reconstruction_loss + self.config['beta_BBB'] * kl_loss
                     else:
                         val_loss = self.criterion(val_outputs, val_truths)

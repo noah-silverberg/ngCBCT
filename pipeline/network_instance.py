@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import init
 import math
+import ast
 
 
 def init_weights(net, init_type='normal', gain=0.02):
@@ -1216,6 +1217,11 @@ class IResNetBBB(nn.Module):
     def __init__(self, img_ch=1, output_ch=1, prior_mu=0, prior_sigma=1e-2):
         super(IResNetBBB, self).__init__()
 
+        if isinstance(prior_mu, str):
+            prior_mu = ast.literal_eval(prior_mu)
+        if isinstance(prior_sigma, str):
+            prior_sigma = ast.literal_eval(prior_sigma)
+
         up_conv = True
 
         self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
@@ -1313,5 +1319,3 @@ class IResNetBBB(nn.Module):
         if priors:
             return "Bayesian Priors:\n  " + "\n  ".join(priors)
         return ""
-    
-print(IResNetBBB())

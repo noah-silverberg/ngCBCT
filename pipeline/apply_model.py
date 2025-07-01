@@ -34,6 +34,7 @@ def apply_model_to_projections(
     prj_ngcbct_li: torch.Tensor,
     device: torch.device,
     train_at_inference: bool = False,  # for MC dropout
+    _batch_size: int = 4, # Number of slices (on each half of the scan) to process at once
 ):
     """Apply CNN model slice-wise to nonstop-gated projections to predict missing projections and combine."""
     if train_at_inference:
@@ -62,9 +63,9 @@ def apply_model_to_projections(
     overlap = v_dim * 2 - num_angles
 
     # Loop over the outputted slices in batches of 4 indices (8 slices total), put the results in the output tensor
-    for i in range(0, 382, 4):
+    for i in range(0, 382, _batch_size):
         # Adjust the batch size for the last batch to avoid going out of bounds
-        batch_size = min(4, 382 - i)
+        batch_size = min(_batch_size, 382 - i)
         indices = [i + j for j in range(batch_size)] + [i + j + 382 for j in range(batch_size)]
         in_ = prj_ngcbct_li[indices].detach().to(device)
         with torch.no_grad():

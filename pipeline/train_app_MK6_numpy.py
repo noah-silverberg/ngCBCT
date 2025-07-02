@@ -205,6 +205,8 @@ class TrainingApp:
             )
         if isinstance(self.config["beta_BBB"], str):
             self.config["beta_BBB"] = ast.literal_eval(self.config["beta_BBB"])
+        if isinstance(self.config["swag_lr"], str):
+            self.config["swag_lr"] = ast.literal_eval(self.config["swag_lr"])
 
         # Set logging level
         if DEBUG:

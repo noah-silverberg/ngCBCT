@@ -402,7 +402,9 @@ class TrainingApp:
             # Start time of the training phase
             epoch_train_start_time = time.time()
 
-            # Loop throught the batches in the training dataloader
+            # Loop through the batches in the training dataloader
+            num_batches = len(train_dl)
+            save_interval = max(1, num_batches // 50)  # Save loss 50 times per epoch if possible
             for batch_idx, train_set in enumerate(tqdm(train_dl, desc=f"Epoch {epoch_ndx} Training")):
 
                 # Extract the input and ground truth (they are already on GPU)
@@ -435,6 +437,11 @@ class TrainingApp:
 
                 # Update epoch training loss
                 epoch_total_train_loss += train_loss.item() * train_inputs.size(0)
+
+                # Save intermediate training loss to the list
+                if batch_idx % save_interval == 0 or batch_idx == num_batches - 1:
+                    intermediate_loss = epoch_total_train_loss / ((batch_idx + 1) * train_inputs.size(0))
+                    avg_train_loss_values.append(intermediate_loss)
 
             # Save avg training statistics
             epoch_avg_train_loss = epoch_total_train_loss / len(train_dl.dataset)
@@ -475,7 +482,9 @@ class TrainingApp:
                 epoch_val_start_time = time.time()
 
                 # Loop through the batches in the validation dataloader
-                for val_set in tqdm(val_dl, desc=f"Epoch {epoch_ndx} Validation"):
+                num_val_batches = len(val_dl)
+                val_save_interval = max(1, num_val_batches // 50)  # Save loss 50 times per epoch if possible
+                for val_batch_idx, val_set in enumerate(tqdm(val_dl, desc=f"Epoch {epoch_ndx} Validation")):
 
                     # Extract the input and ground truth, and send to GPU
                     val_inputs = val_set[0].to(device)
@@ -493,6 +502,11 @@ class TrainingApp:
                     
                     # Update epoch validation loss
                     epoch_total_val_loss += val_loss.item() * val_inputs.size(0)
+
+                    # Save intermediate validation loss to the list
+                    if val_batch_idx % val_save_interval == 0 or val_batch_idx == num_val_batches - 1:
+                        intermediate_val_loss = epoch_total_val_loss / ((val_batch_idx + 1) * val_inputs.size(0))
+                        avg_val_loss_values.append(intermediate_val_loss)
 
                 # Save avg validation statistics
                 epoch_avg_val_loss = epoch_total_val_loss / len(val_dl.dataset)
@@ -577,16 +591,15 @@ class TrainingApp:
             logger.info(f"Model saved to {model_path}")
 
         # Save the training and validation loss values
-        train_loss_path = self.files.get_train_loss_filepath(self.config["model_version"], self.config["domain"])
-        torch.save(
-            avg_train_loss_values,
-            train_loss_path,
-        )
-        validation_loss_path = self.files.get_validation_loss_filepath(self.config["model_version"], self.config["domain"])
-        torch.save(
-            avg_val_loss_values,
-            validation_loss_path,
-        )
+        if self.swag_enabled:
+            train_loss_path = self.files.get_train_loss_filepath(self.config["swag_model_version"], self.config["domain"])
+            validation_loss_path = self.files.get_validation_loss_filepath(self.config["swag_model_version"], self.config["domain"])
+        else:
+            train_loss_path = self.files.get_train_loss_filepath(self.config["model_version"], self.config["domain"])
+            validation_loss_path = self.files.get_validation_loss_filepath(self.config["model_version"], self.config["domain"])
+
+        torch.save(avg_train_loss_values, train_loss_path)
+        torch.save(avg_val_loss_values, validation_loss_path)
         logger.info(f"Training and validation loss saved\n")
 
         # Clean up tensor board writers

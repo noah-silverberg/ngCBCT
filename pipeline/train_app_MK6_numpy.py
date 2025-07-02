@@ -560,14 +560,14 @@ class TrainingApp:
 
         # Training is done
         logger.info("Saving training results...")
-        
-        # For a SWAG run, the snapshots are already saved. For a standard run, save the final model.
-        if not self.swag_enabled:
+
+        if self.swag_enabled:
+            # After training, we have all snapshots. Now create the final model.
+            self._create_swag_model(required_snapshots)
+        elif not self.swag_enabled:
+            # Standard model saving
             model_path = self.files.get_model_filepath(self.config["model_version"], self.config["domain"])
-            torch.save(
-                self.model.state_dict(),
-                model_path,
-            )
+            torch.save(self.model.state_dict(), model_path)
             logger.info(f"Model saved to {model_path}")
 
         # Save the training and validation loss values

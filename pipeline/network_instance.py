@@ -1426,7 +1426,7 @@ class SWAG(nn.Module):
         # Store the final count of models used
         self.register_buffer("n_models", torch.tensor(num_models, dtype=torch.long))
 
-    def sample(self, seed=None):
+    def sample(self, scale=1.0,seed=None):
         """
         Samples a new set of weights from the SWAG posterior and loads them
         into the base model for a forward pass. This is an adaptation of `sample_fullrank`.
@@ -1458,7 +1458,7 @@ class SWAG(nn.Module):
             low_rank_sample /= math.sqrt(num_models - 1)
         
         # 4. Combine samples
-        rand_sample = (diag_sample + low_rank_sample) / math.sqrt(2.0)
+        rand_sample = scale * (diag_sample + low_rank_sample) / math.sqrt(2.0)
         w_sample = mean_vec + rand_sample
 
         # 5. Load the sampled weights back into the model

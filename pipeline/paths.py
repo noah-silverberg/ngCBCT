@@ -248,7 +248,7 @@ class Files:
         return os.path.join(self.directories.projections_aggregate_dir, filename)
     
     @staticmethod
-    def _get_model_filename(model_version, checkpoint=None):
+    def _get_model_filename(model_version, checkpoint=None, swag_lr=None):
         """
         Get the filename for the trained model file based on model version.
 
@@ -260,11 +260,14 @@ class Files:
             str: Filename for the trained model file.
         """
         if checkpoint:
+            if swag_lr is not None:
+                return f"epoch-{checkpoint:02d}_swag_lr-{swag_lr:.1e}.pth"
+            
             return f"epoch-{checkpoint:02d}.pth" # e.g., epoch-05.pth
 
         return f"{model_version}.pth" # e.g., v1.pth
 
-    def get_model_filepath(self, model_version, domain, checkpoint=None, ensure_exists=True):
+    def get_model_filepath(self, model_version, domain, checkpoint=None, swag_lr=None, ensure_exists=True):
         """
         Get the absolute file path for the trained model file.
 
@@ -272,12 +275,15 @@ class Files:
             model_version (str): Model version identifier, e.g. 'v1', 'v2'.
             domain (str): Domain of the model, either 'PROJ' for projections or 'IMAG' for images.
             checkpoint (int, optional): If specified, indicates a checkpoint epoch number.
+            swag_lr (float, optional): Only used if 'checkpoint' is specified.
+                If specified, indicates the learning rate for SWAG.
+                If not specified, the normal checkpoint is used.
             ensure_exists (bool, optional): Whether to ensure the directory exists.
 
         Returns:
             str: Absolute file path for the trained model file.
         """
-        filename = self._get_model_filename(model_version, checkpoint)
+        filename = self._get_model_filename(model_version, checkpoint, swag_lr)
         dir_ = self.directories.get_model_dir(model_version, domain, ensure_exists)
         return os.path.join(dir_, filename)
     

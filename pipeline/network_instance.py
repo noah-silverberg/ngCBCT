@@ -4,6 +4,8 @@ import torch.nn.functional as F
 from torch.nn import init
 import math
 import ast
+from tqdm import tqdm
+import copy
 
 
 def init_weights(net, init_type='normal', gain=0.02):
@@ -1319,3 +1321,151 @@ class IResNetBBB(nn.Module):
         if priors:
             return "Bayesian Priors:\n  " + "\n  ".join(priors)
         return ""
+    
+def flatten(lst):
+    tmp = [i.contiguous().view(-1, 1) for i in lst]
+    return torch.cat(tmp).view(-1)
+
+
+def unflatten_like(vector, likeTensorList):
+    # Takes a flat torch.tensor and unflattens it to a list of torch.tensors
+    #    shaped like likeTensorList
+    outList = []
+    i = 0
+    for tensor in likeTensorList:
+        # n = module._parameters[name].numel()
+        n = tensor.numel()
+        outList.append(vector[:, i : i + n].view(tensor.shape))
+        i += n
+    return outList
+
+def swag_parameters(module, params):
+    """
+    A helper function to recursively replace nn.Parameters with SWAG buffers.
+    This is adapted directly from the official SWAG implementation.
+    """
+    for name in list(module._parameters.keys()):
+        if module._parameters[name] is None:
+            continue
+        data = module._parameters[name].data
+        module._parameters.pop(name)
+        
+        # Register buffers for the SWAG statistics
+        module.register_buffer(f"{name}_mean", data.new_zeros(data.size()))
+        module.register_buffer(f"{name}_sq_mean", data.new_zeros(data.size()))
+        module.register_buffer(f"{name}_cov_mat_sqrt", data.new_empty((0, data.numel())))
+        
+        params.append((module, name))
+
+
+class SWAG(nn.Module):
+    """
+    SWAG Model Wrapper.
+
+    This implementation is a close adaptation of the official SWAG repository's code,
+    modified for a post-hoc workflow where model checkpoints are loaded from disk.
+    """
+    def __init__(self, base_model_cls, swag_checkpoint_paths, swag_cov_mat_rank, **kwargs):
+        super().__init__()
+
+        self.params = []
+        self.base_model = base_model_cls(**kwargs)
+        
+        # This function traverses the model and sets up the buffers for SWAG statistics
+        self.base_model.apply(lambda module: swag_parameters(module, self.params))
+
+        # --- Post-Hoc Collection from Checkpoints ---
+        self._post_hoc_collect(swag_checkpoint_paths, swag_cov_mat_rank)
+        
+    def forward(self, *args, **kwargs):
+        """A forward pass uses the weights currently loaded in the base_model."""
+        return self.base_model(*args, **kwargs)
+
+    def _post_hoc_collect(self, checkpoint_paths, max_num_models):
+        """
+        Performs a post-hoc collection of SWAG statistics by iterating through
+        saved model checkpoints.
+        """
+        # Load all state dicts from the provided paths
+        state_dicts = [torch.load(path) for path in checkpoint_paths]
+        
+        num_models = 0
+        
+        for i, state_dict in enumerate(tqdm(state_dicts, desc="Computing SWAG Statistics")):
+            # Create a temporary base model instance and load the state dict
+            temp_model = copy.deepcopy(self.base_model)
+            # The keys in the saved checkpoint might not have the 'base_model.' prefix
+            # so we need to handle that. A simple way is to strip it if present.
+            cleaned_state_dict = {k.replace('base_model.', ''): v for k, v in state_dict.items()}
+            temp_model.load_state_dict(cleaned_state_dict, strict=False)
+
+            # Use the same logic as the online 'collect_model' method
+            for (module, name), base_param in zip(self.params, temp_model.parameters()):
+                mean = module.__getattr__(f"{name}_mean")
+                sq_mean = module.__getattr__(f"{name}_sq_mean")
+
+                # Update first moment
+                mean.mul_(num_models / (num_models + 1.0)).add_(base_param.data / (num_models + 1.0))
+
+                # Update second moment
+                sq_mean.mul_(num_models / (num_models + 1.0)).add_(base_param.data**2 / (num_models + 1.0))
+
+                # --- CORRECTED: Update deviation using the new running mean ---
+                dev = (base_param.data - mean)
+                
+                cov_mat_sqrt = module.__getattr__(f"{name}_cov_mat_sqrt")
+                cov_mat_sqrt = torch.cat((cov_mat_sqrt, dev.view(1, -1)), dim=0)
+
+                # Keep only the last K deviations
+                if cov_mat_sqrt.shape[0] > max_num_models:
+                    cov_mat_sqrt = cov_mat_sqrt[1:, :]
+                
+                module.__setattr__(f"{name}_cov_mat_sqrt", cov_mat_sqrt)
+            
+            num_models += 1
+
+        # Store the final count of models used
+        self.register_buffer("n_models", torch.tensor(num_models, dtype=torch.long))
+
+    def sample(self, seed=None):
+        """
+        Samples a new set of weights from the SWAG posterior and loads them
+        into the base model for a forward pass. This is an adaptation of `sample_fullrank`.
+        """
+        if seed is not None:
+            torch.manual_seed(seed)
+
+        # 1. Flatten all SWAG statistics into vectors
+        mean_list = [m.__getattr__(f"{n}_mean") for m, n in self.params]
+        sq_mean_list = [m.__getattr__(f"{n}_sq_mean") for m, n in self.params]
+        cov_mat_sqrt_list = [m.__getattr__(f"{n}_cov_mat_sqrt") for m, n in self.params]
+
+        mean_vec = flatten(mean_list)
+        sq_mean_vec = flatten(sq_mean_list)
+        
+        # 2. Draw sample from the diagonal part
+        var_vec = torch.clamp(sq_mean_vec - mean_vec**2, 1e-30)
+        diag_sample = torch.sqrt(var_vec) * torch.randn_like(var_vec)
+
+        # 3. Draw sample from the low-rank part
+        # Concatenate column-wise for the low-rank matrix
+        cov_mat_sqrt = torch.cat(cov_mat_sqrt_list, dim=1) 
+        
+        z = torch.randn(cov_mat_sqrt.shape[0], device=cov_mat_sqrt.device)
+        low_rank_sample = (cov_mat_sqrt.t() @ z)
+        
+        num_models = self.n_models.item()
+        if num_models > 1:
+            low_rank_sample /= math.sqrt(num_models - 1)
+        
+        # 4. Combine samples
+        rand_sample = (diag_sample + low_rank_sample) / math.sqrt(2.0)
+        w_sample = mean_vec + rand_sample
+
+        # 5. Load the sampled weights back into the model
+        # The unflatten_like function expects a batch dimension
+        w_sample = w_sample.unsqueeze(0)
+        samples_list = unflatten_like(w_sample, mean_list)
+
+        for (module, name), sample in zip(self.params, samples_list):
+            module.register_parameter(name, nn.Parameter(sample.squeeze(0)))

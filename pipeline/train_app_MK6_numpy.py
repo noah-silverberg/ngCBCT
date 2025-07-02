@@ -7,9 +7,6 @@ import datetime
 import time
 import gc
 from torch.utils.tensorboard import SummaryWriter
-from torch.optim.swa_utils import AveragedModel, SWALR
-from torch.optim.lr_scheduler import SequentialLR
-import torch.optim as optim
 import torch
 import torch.nn as nn
 from torch.optim import SGD, Adam, NAdam
@@ -180,7 +177,6 @@ class TrainingApp:
         self.config["domain"] = domain
         self.files = files
         self.is_bayesian = self.config["is_bayesian"]
-        self.swag_enabled = self.config["swag_enabled"]
 
         # We need to correct some of the config settings
         # since some values are not read correctly
@@ -222,12 +218,16 @@ class TrainingApp:
         # Initialize model, loss, and optimizer
         self.model = init_model(self.config)
         self.criterion = init_loss(self.config, self.is_bayesian)
+
+        self.swag_enabled = self.config.get("swag_enabled", False)
+
+        # Standard Initialization
+        self.optimizer, self.scheduler = init_optimizer(self.config, self.model)
+        self.start_epoch = 1
         
-        # SWAG Initialization
+        # SWAG-specific setup
         if self.swag_enabled:
             logger.info("SWAG training is enabled. Loading base model checkpoint.")
-            
-            # 1. Load the specified checkpoint
             start_model_version = self.config['swag_start_model_version']
             start_epoch = self.config['swag_start_checkpoint_epoch']
             
@@ -241,52 +241,28 @@ class TrainingApp:
             checkpoint = torch.load(checkpoint_path, map_location=device)
             self.model.load_state_dict(checkpoint['state_dict'])
             logger.info(f"Loaded checkpoint from epoch {checkpoint['epoch']} of model '{start_model_version}'.")
-
-            # 2. Set up the SWAG optimizer
-            optimizer_choice = self.config['swag_optimizer']
-            if optimizer_choice == 'keep':
-                logger.info("Keeping optimizer from loaded checkpoint.")
-                self.optimizer, burn_in_scheduler = init_optimizer(self.config, self.model)
-                self.optimizer.load_state_dict(checkpoint['optimizer'])
-            elif optimizer_choice == 'SGD':
-                logger.info("Initializing new SGD optimizer for SWAG.")
-                self.optimizer = optim.SGD(self.model.parameters(), lr=self.config['learning_rate'])
-                # Create a standard scheduler for the burn-in phase
-                _, burn_in_scheduler = init_optimizer(self.config, self.model)
-            else:
-                raise ValueError(f"Unsupported SWAG optimizer: {optimizer_choice}. Supported optimizers are: 'keep', 'SGD'.")
-
-            # --- NEW SCHEDULER LOGIC ---
-            # This scheduler seamlessly handles the burn-in phase followed by the constant LR SWA phase.
-            swa_scheduler = SWALR(self.optimizer, swa_lr=self.config['swag_lr'])
-            self.scheduler = SequentialLR(self.optimizer, schedulers=[burn_in_scheduler, swa_scheduler], milestones=[self.config['swag_burn_in_epochs']])
-            logger.info(f"Using SequentialLR scheduler: {self.config['swag_burn_in_epochs']} burn-in epochs, then SWALR with constant LR.")
-
-            # 3. Initialize the models for SWA and the SWAG-Diagonal second moment
-            self.swag_model = AveragedModel(self.model)
             
-            # --- NEW: SECOND MOMENT MODEL FOR DIAGONAL COVARIANCE ---
-            # This custom average function will compute the average of the squared parameters.
-            def avg_fn_sq(p_avg, p, num_averaged):
-                return p_avg * num_averaged / (num_averaged + 1.0) + p**2 / (num_averaged + 1.0)
-            self.swa_sq_model = AveragedModel(self.model, avg_fn=avg_fn_sq)
+            # Set up the SWAG optimizer
+            logger.info("Initializing new SGD optimizer for SWAG.")
+            # Use a new SGD optimizer for the burn-in and SWA phases
+            self.optimizer = SGD(self.model.parameters(), lr=self.config['swag_lr'])
+            
+            # Use constant learning rate scheduler for SWAG
+            self.scheduler = torch.optim.lr_scheduler.ConstantLR(
+                self.optimizer,
+                factor=1.0,  # No change in learning rate
+                total_iters=self.config['swag_burn_in_epochs'] + self.config['swag_swa_epochs'],
+            )
 
-            # 4. Initialize storage for the low-rank covariance matrix
-            self.swag_cov_mat_list = []
+            logger.info(f"Using ConstantLR scheduler for SWAG with factor 1.0 and total iters {self.config['swag_burn_in_epochs'] + self.config['swag_swa_epochs']}.")
 
-            self.start_epoch = 1
-            self.epochs = self.config['swag_burn_in_epochs'] + self.config['swag_epochs']
-
-        else: # Standard (Non-SWAG) Initialization
-            self.optimizer, self.scheduler = init_optimizer(self.config, self.model)
-            # Resume from checkpoint if provided
-            self.start_epoch = 1
-            if (
-                checkpoint_epoch is not None
-                and optimizer_state is not None
-                and network_state is not None
-            ):
-                self._load_checkpoint(checkpoint_epoch, optimizer_state, network_state)
+        # Standard resume from checkpoint logic
+        elif (
+            checkpoint_epoch is not None
+            and optimizer_state is not None
+            and network_state is not None
+        ):
+            self._load_checkpoint(checkpoint_epoch, optimizer_state, network_state)
 
     def _load_checkpoint(
         self, checkpoint_epoch: int, optimizer_state: dict, network_state: dict
@@ -297,18 +273,81 @@ class TrainingApp:
         self.start_epoch = checkpoint_epoch + 1  # Resume from the next epoch
         logger.info(f"Resumed training from checkpoint: Epoch {checkpoint_epoch}")
 
+    def _create_swag_model(self, snapshot_paths: list):
+        """Helper function to perform the post-hoc SWAG computation and saving."""
+        logger.info(f"Starting post-hoc SWAG computation from {len(snapshot_paths)} snapshots...")
+        
+        base_model_cls = getattr(network_instance, self.config["network_name"])
+        
+        swag_model = network_instance.SWAG(
+            base_model_cls=base_model_cls,
+            swag_checkpoint_paths=snapshot_paths,
+            swag_cov_mat_rank=self.config['swag_cov_mat_rank'],
+            **self.config["network_kwargs"]
+        )
+
+        # NOTE: We don't use batch norm, but if we did we would need to do this
+        # # Update batch norm stats
+        # train_dl = init_dataloader(self.config, self.files, "TRAIN", self.config.get("input_type"), self.config['domain'])
+        # torch.optim.swa_utils.update_bn(train_dl, swag_model)
+        
+        # Save the final computed SWAG model
+        final_save_path = self.files.get_model_filepath(self.config['swag_model_version'], self.config["domain"])
+        torch.save(swag_model.state_dict(), final_save_path)
+        logger.info(f"Final SWAG model saved to: {final_save_path}")
+
 
     def main(self):
-        # Make sure we're not accidentally overwriting an existing model version
         if self.swag_enabled:
-            save_dir = self.files.directories.get_model_dir(self.config["swag_model_version"], self.config["domain"], ensure_exists=False)
-        else:
+            swag_model_version = self.config['swag_model_version']
+            final_swag_path = self.files.get_model_filepath(swag_model_version, self.config["domain"], ensure_exists=False)
+
+            # If the final SWAG model already exists, we are done.
+            if os.path.exists(final_swag_path):
+                logger.error(f"Final SWAG model already exists at {final_swag_path}. Please delete it or choose a different model version.")
+                return
+
+            # Check which SWA snapshots we need and which we already have.
+            burn_in_epochs = self.config['swag_burn_in_epochs']
+            swa_epochs = self.config['swag_swa_epochs']
+            start_epoch = self.config['swag_start_checkpoint_epoch']
+
+            required_snapshots = []
+            for i in range(1, swa_epochs + 1):
+                epoch = start_epoch + burn_in_epochs + i
+                path = self.files.get_model_filepath(
+                    self.config['swag_start_model_version'],
+                    self.config['domain'],
+                    checkpoint=epoch,
+                    swag_lr=self.config['swag_lr']
+                )
+                required_snapshots.append(path)
+
+            existing_snapshots = [p for p in required_snapshots if os.path.exists(p)]
+
+            # If we have all required snapshots, just build the final model.
+            if len(existing_snapshots) == len(required_snapshots):
+                logger.info("All required SWA snapshots already exist. Proceeding directly to post-hoc SWAG model creation.")
+                self._create_swag_model(existing_snapshots)
+                return
+            
+            # Otherwise, we need to resume training to generate the missing snapshots.
+            if len(existing_snapshots) > 0:
+                logger.info(f"Found {len(existing_snapshots)} existing SWA snapshots. Resuming training to generate the rest.")
+                latest_snapshot = existing_snapshots[-1]
+                self.model.load_state_dict(torch.load(latest_snapshot))
+                # The start_epoch for the loop is the epoch *after* the last snapshot
+                last_epoch_num = int(latest_snapshot.split('epoch-')[1].split('.pth')[0])
+                self.start_epoch = last_epoch_num + 1
+            else:
+                # No snapshots exist, start from the beginning of the SWAG process
+                self.start_epoch = start_epoch + burn_in_epochs + 1
+
+        else: # Standard non-SWAG run
             save_dir = self.files.directories.get_model_dir(self.config["model_version"], self.config["domain"], ensure_exists=False)
-        if os.path.exists(save_dir) and self.start_epoch == 1:
-            logger.error(
-                f"Save directory {save_dir} already exists. Please choose a different model version or delete the existing directory, or manually delete this."
-            )
-            return
+            if os.path.exists(save_dir) and self.start_epoch == 1:
+                logger.error(f"Save directory {save_dir} already exists. Please choose a different model version or delete the existing directory.")
+                return
 
         logger.debug("Starting {}, {}".format(type(self).__name__, self.config))
 
@@ -333,32 +372,19 @@ class TrainingApp:
         avg_train_loss_values = []
         avg_val_loss_values = []
 
+        swag_snapshot_paths = []
+        if self.swag_enabled:
+            # Determine the name for the final saved SWAG model
+            swag_model_version = self.config['swag_model_version']
+            swa_save_dir = self.files.directories.get_model_dir(swag_model_version, self.config["domain"])
+
         # Train for the chosen number of epochs
         logger.info("STARTING TRAINING...")
-
-        if self.swag_enabled:
-            total_epochs = self.epochs
-        else:
-            total_epochs = self.config["epochs"]
-
         # NOTE: epoch_ndx is 1-indexed!!
-        for epoch_ndx in range(self.start_epoch, total_epochs + 1):
-            
-            # SWAG learning rate and phase logic
-            is_swa_phase = False
-            if self.swag_enabled:
-                burn_in_epochs = self.config['swag_burn_in_epochs']
-                if epoch_ndx > burn_in_epochs:
-                    is_swa_phase = True
-                    desc_phase = f"SWA Epoch {epoch_ndx - burn_in_epochs}/{total_epochs - burn_in_epochs}"
-                else:
-                    desc_phase = f"Burn-in Epoch {epoch_ndx}/{burn_in_epochs}"
-            else: # Standard training
-                logger.debug(
-                    f"Learning rate is {self.scheduler.get_last_lr()[0]} at epoch {epoch_ndx}."
-                )
-                desc_phase = f"Epoch {epoch_ndx} Training"
-            
+        for epoch_ndx in range(self.start_epoch, self.config["epochs"] + 1):
+            logger.debug(
+                f"Learning rate is {self.scheduler.get_last_lr()[0]} at epoch {epoch_ndx}."
+            )
 
             # Set the model to training mode
             self.model.train()
@@ -371,7 +397,7 @@ class TrainingApp:
             epoch_train_start_time = time.time()
 
             # Loop throught the batches in the training dataloader
-            for batch_idx, train_set in enumerate(tqdm(train_dl, desc=desc_phase)):
+            for batch_idx, train_set in enumerate(tqdm(train_dl, desc=f"Epoch {epoch_ndx} Training")):
 
                 # Extract the input and ground truth (they are already on GPU)
                 train_inputs = train_set[0].float()
@@ -400,22 +426,6 @@ class TrainingApp:
 
                 # Parameter update
                 self.optimizer.step()
-
-                # Update SWAG model parameters if in SWA phase
-                if is_swa_phase and batch_idx % self.config['swag_update_freq'] == 0:
-                    self.swag_model.update_parameters(self.model)
-                    
-                    # --- NEW: UPDATE FOR FULL SWAG COVARIANCE ---
-                    self.swa_sq_model.update_parameters(self.model) # Update the second moment
-                    
-                    # Collect deviation vector for the low-rank part of the covariance matrix
-                    with torch.no_grad():
-                        curr_params = torch.nn.utils.parameters_to_vector(self.model.parameters())
-                        swa_params = torch.nn.utils.parameters_to_vector(self.swag_model.parameters())
-                        deviation = curr_params - swa_params
-                        self.swag_cov_mat_list.append(deviation)
-                        if len(self.swag_cov_mat_list) > self.config['swag_cov_mat_rank']:
-                            self.swag_cov_mat_list.pop(0)
 
                 # Update epoch training loss
                 epoch_total_train_loss += train_loss.item() * train_inputs.size(0)
@@ -493,9 +503,24 @@ class TrainingApp:
                         time.time() - epoch_val_start_time,
                     )
                 )
-            
-            # Skip checkpoint saving during SWAG training
-            if not self.swag_enabled:
+
+            # Save model if needed (either at checkpoint or at end of training)
+            if self.swag_enabled:
+                burn_in_epochs = self.config['swag_burn_in_epochs']
+                is_swa_phase = epoch_ndx > burn_in_epochs
+                
+                # During SWA phase, save a snapshot every epoch
+                if is_swa_phase:
+                    save_path = self.files.get_model_filepath(
+                        self.config['swag_start_model_version'], 
+                        self.config["domain"], 
+                        checkpoint=epoch_ndx, 
+                        swag_lr=self.config['swag_lr']
+                    )
+                    torch.save(self.model.state_dict(), save_path)
+                    logger.info(f"Saved SWA snapshot to {save_path}")
+
+            else:
                 if (
                     epoch_ndx % self.config["checkpoint_save_step"] == 0
                     or epoch_ndx == self.config["epochs"]
@@ -512,7 +537,6 @@ class TrainingApp:
                     logger.info(
                         "Checkpoint saved at epoch {}: {}\n".format(epoch_ndx, save_path)
                     )
-
                     # Delete most recent checkpoint to save space
                     if epoch_ndx > self.config["checkpoint_save_step"]:
                         old_save_path = self.files.get_model_filepath(self.config["model_version"], self.config["domain"], checkpoint=epoch_ndx - self.config["checkpoint_save_step"])
@@ -525,7 +549,6 @@ class TrainingApp:
                                 )
                             )
 
-
             # Update the learning rate
             self.scheduler.step()
 
@@ -537,37 +560,16 @@ class TrainingApp:
 
         # Training is done
         logger.info("Saving training results...")
-        if self.swag_enabled:
-            # logger.info("SWAG training complete. Updating batch norm statistics for SWA model.")
-            # torch.optim.swa_utils.update_bn(train_dl, self.swag_model, device=device)
-
-            if self.config.get('swag_model_version'):
-                save_model_version = self.config['swag_model_version']
-            else:
-                save_model_version = self.config['model_version']
-
-            save_path = self.files.get_model_filepath(save_model_version, self.config["domain"])
-            logger.info(f"Saving final SWAG model (mean, diagonal, and low-rank covariance) to: {save_path}")
-            
-            # Convert covariance list to a tensor
-            swag_cov_mat = torch.stack(self.swag_cov_mat_list)
-
-            # Now saving the mean, the second moment for the diagonal, and the low-rank deviations
-            torch.save({
-                'state_dict': self.swag_model.state_dict(),
-                'state_dict_sq': self.swa_sq_model.state_dict(),
-                'cov_mat_list': swag_cov_mat,
-            }, save_path)
-            logger.info(f"SWAG model and covariance matrix saved to {save_path}")
-        else:
-            # Save the final model state
+        
+        # For a SWAG run, the snapshots are already saved. For a standard run, save the final model.
+        if not self.swag_enabled:
             model_path = self.files.get_model_filepath(self.config["model_version"], self.config["domain"])
             torch.save(
                 self.model.state_dict(),
                 model_path,
             )
             logger.info(f"Model saved to {model_path}")
-        
+
         # Save the training and validation loss values
         train_loss_path = self.files.get_train_loss_filepath(self.config["model_version"], self.config["domain"])
         torch.save(

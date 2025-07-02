@@ -16,9 +16,10 @@ RUN = "1"
 
 # the three scans to plot
 SCANS = [
-    ("HF", "20", "01"),
-    ("HF", "14", "01"),
-    ("FF", "22", "01"),
+    # ("HF", "20", "01"),
+    # ("HF", "14", "01"),
+    # ("FF", "22", "01"),
+    ("FF", "18", "01"),
 ]
 
 # the crops for each scan (y0, y1, x0, x1)
@@ -38,6 +39,11 @@ CROPS = {
         "width": (0, 160 - 0, 15, 256 - 53),
         "height": (0, 160 - 0, 8, 256 - 9),
     },
+    ("FF", "18", "01"): {
+        "index": (5, 256 - 55, 0, 256 - 0),
+        "width": (0, 160 - 0, 15, 256 - 53),
+        "height": (0, 160 - 0, 35, 256 - 9),
+    },
 }
 
 SUBPLOTS = {
@@ -55,6 +61,11 @@ SUBPLOTS = {
         "top": 0.88,
         "hspace": 0.05,
         "height_factor": 3.4,
+    },
+    ("FF", "18", "01"): {
+        "top": 0.88,
+        "hspace": 0.01,
+        "height_factor": 3.5,
     },
 }
 
@@ -81,6 +92,17 @@ ARROW_PARAMS = {
         "height": {
             "tail_dx": -30,
             "tail_dy": -34,
+            "tip_dx": -5,
+            "tip_dy": -10,
+            "lw": 3,
+        },
+    },
+    ("FF", "18", "01"): {
+        "index": {"tail_dx": -40, "tail_dy": -53, "tip_dx": -12, "tip_dy": -22, "lw": 3},
+        "width": {"tail_dx": -28, "tail_dy": -47, "tip_dx": -5, "tip_dy": -18, "lw": 3},
+        "height": {
+            "tail_dx": -30,
+            "tail_dy": -40,
             "tip_dx": -5,
             "tip_dy": -10,
             "lw": 3,
@@ -372,11 +394,13 @@ def plot_scan(scan_type, pid, sid):
     fig.patches.append(rect)
     # ─────────────────────────────────────────────────────────────────────────────
 
-    outname = f"{scan_type}_p{pid}_{sid}.png"
+    outname_png = f"{scan_type}_p{pid}_{sid}.png"
+    outname_pdf = f"{scan_type}_p{pid}_{sid}.pdf"
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    fig.savefig(os.path.join(OUTPUT_DIR, outname), dpi=400)
+    fig.savefig(os.path.join(OUTPUT_DIR, outname_png), dpi=400)
+    fig.savefig(os.path.join(OUTPUT_DIR, outname_pdf), dpi=400)
     plt.close(fig)
-    print("Saved", outname)
+    print("Saved", outname_png, "and", outname_pdf)
 
 
 def main():

@@ -339,7 +339,7 @@ class TrainingApp:
                 latest_snapshot = existing_snapshots[-1]
                 self.model.load_state_dict(torch.load(latest_snapshot))
                 # The start_epoch for the loop is the epoch *after* the last snapshot
-                last_epoch_num = int(latest_snapshot.split('epoch-')[1].split('.pth')[0])
+                last_epoch_num, _ = self.files._get_checkpoint_swag_lr(os.path.basename(latest_snapshot))
                 self.start_epoch = last_epoch_num + 1
             else:
                 # No snapshots exist, start from the beginning of the SWAG process
@@ -383,7 +383,11 @@ class TrainingApp:
         # Train for the chosen number of epochs
         logger.info("STARTING TRAINING...")
         # NOTE: epoch_ndx is 1-indexed!!
-        for epoch_ndx in range(self.start_epoch, self.config["epochs"] + 1):
+        if self.swag_enabled:
+            total_epochs = self.config["swag_start_checkpoint_epoch"] + self.config['swag_burn_in_epochs'] + self.config['swag_swa_epochs']
+        else:
+            total_epochs = self.config["epochs"]
+        for epoch_ndx in range(self.start_epoch, total_epochs + 1):
             logger.debug(
                 f"Learning rate is {self.scheduler.get_last_lr()[0]} at epoch {epoch_ndx}."
             )

@@ -248,6 +248,32 @@ class Files:
         return os.path.join(self.directories.projections_aggregate_dir, filename)
     
     @staticmethod
+    def _get_checkpoint_swag_lr(filename):
+        """
+        Extract the checkpoint epoch and SWAG learning rate from the filename.
+        Args:
+            filename (str): Filename of the model checkpoint.
+        Returns:
+            tuple: A tuple containing the checkpoint epoch (int) and SWAG learning rate (float).
+                Note if the SWAG learning rate is not present, it will be None.
+        """
+        # Example filename: epoch-05_swag_lr-1.0e-3.pth
+        # Split off the .pth extension
+        base = filename.replace('.pth', '')
+        # Split on the first underscore from the left
+        if '_swag_lr-' in base:
+            epoch_part, swag_lr_part = base.split('_swag_lr-', 1)
+            checkpoint = int(epoch_part.split('-')[1])
+            swag_lr = float(swag_lr_part)
+        else:
+            # Only epoch part present
+            checkpoint = int(base.split('-')[1])
+            swag_lr = None
+
+        return checkpoint, swag_lr
+
+    
+    @staticmethod
     def _get_model_filename(model_version, checkpoint=None, swag_lr=None):
         """
         Get the filename for the trained model file based on model version.

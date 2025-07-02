@@ -207,6 +207,11 @@ class TrainingApp:
             self.config["beta_BBB"] = ast.literal_eval(self.config["beta_BBB"])
         if isinstance(self.config["swag_lr"], str):
             self.config["swag_lr"] = ast.literal_eval(self.config["swag_lr"])
+        if isinstance(self.config["swag_momentum"], str):
+            self.config["swag_momentum"] = ast.literal_eval(self.config["swag_momentum"])
+        if isinstance(self.config["swag_weight_decay"], str):
+            self.config["swag_weight_decay"] = ast.literal_eval(self.config["swag_weight_decay"])
+
 
         # Set logging level
         if DEBUG:
@@ -247,7 +252,7 @@ class TrainingApp:
             # Set up the SWAG optimizer
             logger.info("Initializing new SGD optimizer for SWAG.")
             # Use a new SGD optimizer for the burn-in and SWA phases
-            self.optimizer = SGD(self.model.parameters(), lr=self.config['swag_lr'])
+            self.optimizer = SGD(self.model.parameters(), lr=self.config['swag_lr'], momentum=self.config['swag_momentum'], weight_decay=self.config['swag_weight_decay'])
             
             # Use constant learning rate scheduler for SWAG
             self.scheduler = torch.optim.lr_scheduler.ConstantLR(
@@ -321,7 +326,9 @@ class TrainingApp:
                     self.config['swag_start_model_version'],
                     self.config['domain'],
                     checkpoint=epoch,
-                    swag_lr=self.config['swag_lr']
+                    swag_lr=self.config['swag_lr'],
+                    swag_momentum=self.config['swag_momentum'],
+                    swag_weight_decay=self.config['swag_weight_decay'],
                 )
                 required_snapshots.append(path)
 
@@ -339,7 +346,7 @@ class TrainingApp:
                 latest_snapshot = existing_snapshots[-1]
                 self.model.load_state_dict(torch.load(latest_snapshot))
                 # The start_epoch for the loop is the epoch *after* the last snapshot
-                last_epoch_num, _ = self.files._get_checkpoint_swag_lr(os.path.basename(latest_snapshot))
+                last_epoch_num, _, _, _ = self.files._get_checkpoint_swag_params(latest_snapshot)
                 self.start_epoch = last_epoch_num + 1
             else:
                 # No snapshots exist, start from the beginning of the SWAG process

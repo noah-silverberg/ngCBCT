@@ -125,11 +125,14 @@ class Directories:
 
         return dir_path
 
-    def get_images_results_dir(self, model_version, ensure_exists=True):
+    def get_images_results_dir(self, model_version, passthrough_num, ensure_exists=True):
         """
         Get the directory path for the image results of a specific ID model version.
         """
         dir_path = os.path.join(self.images_results_dir, model_version)
+
+        if passthrough_num is not None:
+            dir_path = os.path.join(dir_path, f"passthrough_{passthrough_num:02d}")
 
         if ensure_exists:
             ensure_dir(dir_path)
@@ -248,52 +251,77 @@ class Files:
         return os.path.join(self.directories.projections_aggregate_dir, filename)
     
     @staticmethod
-    def _get_checkpoint_swag_lr(filename):
+    def _get_checkpoint_swag_params(filename):
         """
-        Extract the checkpoint epoch and SWAG learning rate from the filename.
+        Extract the checkpoint epoch, SWAG learning rate, momentum, and weight decay from the filename.
         Args:
             filename (str): Filename of the model checkpoint.
         Returns:
-            tuple: A tuple containing the checkpoint epoch (int) and SWAG learning rate (float).
-                Note if the SWAG learning rate is not present, it will be None.
+            tuple: A tuple containing the checkpoint epoch (int), SWAG learning rate (float),
+                SWAG momentum (float), and SWAG weight decay (float).
+                Note if any SWAG parameters are not present, they will be None.
         """
-        # Example filename: epoch-05_swag_lr-1.0e-3.pth
+        # Example filename: epoch-05_swag_lr-1.0e-3_swag_mom-0.9_swag_wd-1.0e-4.pth
         # Split off the .pth extension
         base = filename.replace('.pth', '')
-        # Split on the first underscore from the left
-        if '_swag_lr-' in base:
-            epoch_part, swag_lr_part = base.split('_swag_lr-', 1)
-            checkpoint = int(epoch_part.split('-')[1])
-            swag_lr = float(swag_lr_part)
-        else:
-            # Only epoch part present
-            checkpoint = int(base.split('-')[1])
-            swag_lr = None
+        # Initialize default values
+        checkpoint = None
+        swag_lr = None
+        swag_momentum = None
+        swag_weight_decay = None
 
-        return checkpoint, swag_lr
+        # Extract the checkpoint epoch
+        if 'epoch-' in base:
+            epoch_part = base.split('_')[0]
+            checkpoint = int(epoch_part.split('-')[1])
+
+        # Extract SWAG learning rate, momentum, and weight decay if present
+        if '_swag_lr-' in base:
+            swag_lr_part = base.split('_swag_lr-', 1)[1]
+            swag_lr = float(swag_lr_part.split('_')[0])
+
+        if '_swag_mom-' in base:
+            swag_momentum_part = base.split('_swag_mom-', 1)[1]
+            swag_momentum = float(swag_momentum_part.split('_')[0])
+
+        if '_swag_wd-' in base:
+            swag_weight_decay_part = base.split('_swag_wd-', 1)[1]
+            swag_weight_decay = float(swag_weight_decay_part.split('_')[0])
+
+        return checkpoint, swag_lr, swag_momentum, swag_weight_decay
 
     
     @staticmethod
-    def _get_model_filename(model_version, checkpoint=None, swag_lr=None):
+    def _get_model_filename(model_version, checkpoint=None, swag_lr=None, swag_momentum=None, swag_weight_decay=None):
         """
         Get the filename for the trained model file based on model version.
 
         Args:
             model_version (str): Model version identifier, e.g. 'v1', 'v2'.
             checkpoint (int, optional): If specified, indicates a checkpoint epoch number.
+            swag_lr (float, optional): Only used if 'checkpoint' is specified.
+                If specified, indicates the learning rate for SWAG.
+                If not specified, the normal checkpoint is used.
+            swag_momentum (float, optional): Only used if 'checkpoint' is specified.
+            swag_weight_decay (float, optional): Only used if 'checkpoint' is specified.
 
         Returns:
             str: Filename for the trained model file.
         """
         if checkpoint:
+            base = f"epoch-{checkpoint:02d}"
             if swag_lr is not None:
-                return f"epoch-{checkpoint:02d}_swag_lr-{swag_lr:.1e}.pth"
-            
-            return f"epoch-{checkpoint:02d}.pth" # e.g., epoch-05.pth
+                base += f"_swag_lr-{swag_lr:.1e}"
+            if swag_momentum is not None:
+                base += f"_swag_mom-{swag_momentum:.1f}"
+            if swag_weight_decay is not None:
+                base += f"_swag_wd-{swag_weight_decay:.1e}"
+        else:
+            base = model_version
 
-        return f"{model_version}.pth" # e.g., v1.pth
+        return base + ".pth"
 
-    def get_model_filepath(self, model_version, domain, checkpoint=None, swag_lr=None, ensure_exists=True):
+    def get_model_filepath(self, model_version, domain, checkpoint=None, swag_lr=None, swag_momentum=None, swag_weight_decay=None, ensure_exists=True):
         """
         Get the absolute file path for the trained model file.
 
@@ -304,12 +332,16 @@ class Files:
             swag_lr (float, optional): Only used if 'checkpoint' is specified.
                 If specified, indicates the learning rate for SWAG.
                 If not specified, the normal checkpoint is used.
+            swag_momentum (float, optional): Only used if 'checkpoint' is specified.
+                If specified, indicates the momentum for SWAG.
+            swag_weight_decay (float, optional): Only used if 'checkpoint' is specified.
+                If specified, indicates the weight decay for SWAG.
             ensure_exists (bool, optional): Whether to ensure the directory exists.
 
         Returns:
             str: Absolute file path for the trained model file.
         """
-        filename = self._get_model_filename(model_version, checkpoint, swag_lr)
+        filename = self._get_model_filename(model_version, checkpoint, swag_lr, swag_momentum, swag_weight_decay)
         dir_ = self.directories.get_model_dir(model_version, domain, ensure_exists)
         return os.path.join(dir_, filename)
     
@@ -508,7 +540,7 @@ class Files:
         """
         return f"p{patient}_{scan}.pt" # e.g., p01_01.pt
     
-    def get_images_results_filepath(self, model_version, patient, scan, ensure_exists=True):
+    def get_images_results_filepath(self, model_version, patient, scan, passthrough_num=None, ensure_exists=True):
         """
         Get the absolute file path for the image results `.pt` file.
 
@@ -516,11 +548,12 @@ class Files:
             model_version (str): Model version identifier, e.g. 'v1', 'v2'.
             patient (str): Patient identifier, e.g. '01'.
             scan (str): Scan identifier, e.g. '01'.
+            passthrough_num (int, optional): The passthrough number (leave as None for deterministic).
             ensure_exists (bool, optional): Whether to ensure the directory exists.
 
         Returns:
             str: Absolute file path for the image results `.pt` file.
         """
         filename = self._get_images_results_filename(patient, scan)
-        dir_ = self.directories.get_images_results_dir(model_version, ensure_exists)
+        dir_ = self.directories.get_images_results_dir(model_version, passthrough_num, ensure_exists)
         return os.path.join(dir_, filename)

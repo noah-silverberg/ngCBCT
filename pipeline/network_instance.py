@@ -1369,7 +1369,9 @@ class SWAG(nn.Module):
         super().__init__()
 
         self.params = []
-        self.base_model = base_model_cls(**kwargs)
+        self.base_model_cls = base_model_cls
+        self.base_model_kwargs = kwargs
+        self.base_model = self.base_model_cls(**self.base_model_kwargs)
         
         # This function traverses the model and sets up the buffers for SWAG statistics
         self.base_model.apply(lambda module: swag_parameters(module, self.params))
@@ -1393,11 +1395,8 @@ class SWAG(nn.Module):
         
         for i, state_dict in enumerate(tqdm(state_dicts, desc="Computing SWAG Statistics")):
             # Create a temporary base model instance and load the state dict
-            temp_model = copy.deepcopy(self.base_model)
-            # The keys in the saved checkpoint might not have the 'base_model.' prefix
-            # so we need to handle that. A simple way is to strip it if present.
-            cleaned_state_dict = {k.replace('base_model.', ''): v for k, v in state_dict.items()}
-            temp_model.load_state_dict(cleaned_state_dict, strict=False)
+            temp_model = self.base_model_cls(**self.base_model_kwargs)
+            temp_model.load_state_dict(state_dict)
 
             # Use the same logic as the online 'collect_model' method
             for (module, name), base_param in zip(self.params, temp_model.parameters()):
@@ -1468,4 +1467,4 @@ class SWAG(nn.Module):
         samples_list = unflatten_like(w_sample, mean_list)
 
         for (module, name), sample in zip(self.params, samples_list):
-            module.register_parameter(name, nn.Parameter(sample.squeeze(0)))
+            module.register_parameter(name, nn.Parameter(sample))

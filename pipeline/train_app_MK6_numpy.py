@@ -533,19 +533,17 @@ class TrainingApp:
 
             # Save model if needed (either at checkpoint or at end of training)
             if self.swag_enabled:
-                burn_in_epochs = self.config['swag_burn_in_epochs']
-                is_swa_phase = epoch_ndx > burn_in_epochs
-                
                 # During SWA phase, save a snapshot every epoch
-                if is_swa_phase:
-                    save_path = self.files.get_model_filepath(
-                        self.config['swag_start_model_version'], 
-                        self.config["domain"], 
-                        checkpoint=epoch_ndx, 
-                        swag_lr=self.config['swag_lr']
-                    )
-                    torch.save(self.model.state_dict(), save_path)
-                    logger.info(f"Saved SWA snapshot to {save_path}")
+                save_path = self.files.get_model_filepath(
+                    self.config['swag_start_model_version'], 
+                    self.config["domain"], 
+                    checkpoint=epoch_ndx, 
+                    swag_lr=self.config['swag_lr'],
+                    swag_momentum=self.config['swag_momentum'],
+                    swag_weight_decay=self.config['swag_weight_decay'],
+                )
+                torch.save(self.model.state_dict(), save_path)
+                logger.info(f"Saved SWA snapshot to {save_path}")
 
             else:
                 if (

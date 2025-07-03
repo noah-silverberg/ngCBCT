@@ -142,6 +142,7 @@ def apply_model_to_recons(
     pt_path: str,
     device: torch.device,
     train_at_inference: bool = False, # for MC dropout
+    _batch_size: int = 8, # Number of slices to process at once
 ):
     """Apply CNN model slice-wise to nonstop-gated reconstructions to clean up image domain artifacts."""
     # Load the nonstop-gated reconstruction
@@ -157,10 +158,10 @@ def apply_model_to_recons(
         # Set the model to eval mode for inference
         model.eval()
 
-    # Loop over the outputted slices in batches of 8
-    for i in range(0, recon.shape[0], 8):
+    # Loop over the outputted slices in batches of _batch_size
+    for i in range(0, recon.shape[0], _batch_size):
         # Adjust the batch size for the last batch to avoid going out of bounds
-        batch_size = min(8, recon.shape[0] - i)
+        batch_size = min(_batch_size, recon.shape[0] - i)
         indices = [i + j for j in range(batch_size)]
         with torch.no_grad():
             recon[indices] = model(recon[indices]) # replace the slices in place

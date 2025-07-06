@@ -249,14 +249,44 @@ class TrainingApp:
             self.model.load_state_dict(checkpoint['state_dict'])
             logger.info(f"Loaded checkpoint from epoch {checkpoint['epoch']} of model '{start_model_version}'.")
 
-            # Manually set all dropout layers to zero
-            for module in self.model.modules():
-                if isinstance(module, (nn.Dropout, nn.Dropout2d, nn.Dropout3d)):
-                    module.p = 0.0
-                    logger.debug(f"Set dropout layer {module} to zero.")
+            # 1. Define the layers you want to freeze during SWAG training.
+            # These are the names of the attributes in your IResNet class definition.
+            layers_to_freeze = ['conv1', 'conv1_extra', 'up2', 'up_conv2', 'conv_1x1']
 
-            # Print out model summary
-            logger.debug(self.model)
+            print("--- Configuring model parameters for SWAG ---")
+
+            # 2. Iterate through all named parameters to freeze the specified layers.
+            for name, param in self.model.named_parameters():
+                # Assume all layers are trainable at first
+                param.requires_grad = True
+                
+                # Freeze layers that start with the specified names
+                for layer_name in layers_to_freeze:
+                    if name.startswith(layer_name):
+                        param.requires_grad = False
+                        break # Exit the inner loop once a match is found
+
+            # 3. Create a list of parameters that WILL be trained during SWAG.
+            # This is the list you must pass to your SWAG optimizer.
+            swag_params = [p for p in self.model.parameters() if p.requires_grad]
+
+            # 4. (Verification) Print a summary to confirm the setup.
+            print("Layers to be FROZEN (requires_grad=False):")
+            for name, param in self.model.named_parameters():
+                if not param.requires_grad:
+                    print(f"  - {name}")
+
+            print("\nLayers to be TRAINED with SWAG (requires_grad=True):")
+            # You can uncomment the line below for a full list, but it might be long.
+            # for name, param in self.model.named_parameters():
+            #     if param.requires_grad:
+            #         print(f"  - {name}")
+
+            num_total_params = sum(p.numel() for p in self.model.parameters())
+            num_swag_params = sum(p.numel() for p in swag_params)
+            print(f"\nTotal parameters: {num_total_params:,}")
+            print(f"Parameters for SWAG training: {num_swag_params:,}")
+            print(f"Frozen parameters: {num_total_params - num_swag_params:,}")
             
             # Set up the SWAG optimizer
             logger.info("Initializing new SGD optimizer for SWAG.")

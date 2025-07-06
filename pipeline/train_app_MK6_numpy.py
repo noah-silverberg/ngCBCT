@@ -17,7 +17,8 @@ from tqdm import tqdm
 from .utils import ensure_dir
 import ast
 from pipeline.paths import Files
-import math # Added for BBB beta calculation
+from .aggregate_ct import aggregate_saved_recons
+import numpy as np
 
 
 # Set up logging
@@ -164,6 +165,7 @@ class TrainingApp:
         checkpoint_epoch: int = None,
         optimizer_state: dict = None,
         network_state: dict = None,
+        scans_agg: dict = None,
     ):
         if domain == "PROJ":
             self.config = config["PD_settings"]
@@ -177,6 +179,14 @@ class TrainingApp:
         self.config["domain"] = domain
         self.files = files
         self.is_bayesian = self.config["is_bayesian"]
+
+        # Store the list of scans needed for on-the-fly aggregation
+        if scans_agg is None:
+            self.scans_agg_train = None
+            self.scans_agg_val = None
+        else:
+            self.scans_agg_train = scans_agg['TRAIN']
+            self.scans_agg_val = scans_agg['VALIDATION']
 
         # We need to correct some of the config settings
         # since some values are not read correctly
@@ -399,9 +409,11 @@ class TrainingApp:
 
         logger.debug("Starting {}, {}".format(type(self).__name__, self.config))
 
-        # Get the dataloaders for training and validation
-        train_dl = init_dataloader(self.config, self.files, "TRAIN", self.config["input_type"], self.config['domain'])
-        val_dl = init_dataloader(self.config, self.files, "VALIDATION", self.config["input_type"], self.config['domain'])
+        if self.scans_agg_train is None:
+            logger.debug("Using same dataset for all epochs...")
+            # Get the dataloaders for training and validation
+            train_dl = init_dataloader(self.config, self.files, "TRAIN", self.config["input_type"], self.config['domain'])
+            val_dl = init_dataloader(self.config, self.files, "VALIDATION", self.config["input_type"], self.config['domain'])
 
         # Initialize the tensorboard writers if enabled
         if self.config["tensor_board"]:
@@ -434,6 +446,69 @@ class TrainingApp:
         else:
             total_epochs = self.config["epochs"]
         for epoch_ndx in range(self.start_epoch, total_epochs + 1):
+            if self.scans_agg_train is not None:
+                logger.debug(f"Starting on-the-fly aggregation for epoch {epoch_ndx}...")
+
+                input_type = self.config['input_type']
+                ng_agg_path_train = self.files.get_images_aggregate_filepath(input_type, 'TRAIN', gated=False)
+                ng_agg_path_val = self.files.get_images_aggregate_filepath(input_type, 'VALIDATION', gated=False)
+
+                # Delete existing aggregated files if they exist
+                if os.path.exists(ng_agg_path_train):
+                    try:
+                        os.remove(ng_agg_path_train)
+                        logger.warning(f"Removed existing aggregated training file: {ng_agg_path_train}")
+                    except Exception as e:
+                        logger.error(f"Error removing aggregated training file: {e}")
+                if os.path.exists(ng_agg_path_val):
+                    try:
+                        os.remove(ng_agg_path_val)
+                        logger.warning(f"Removed existing aggregated validation file: {ng_agg_path_val}")
+                    except Exception as e:
+                        logger.error(f"Error removing aggregated validation file: {e}")
+
+                # Map epoch number (1-50) to passthrough number (0-49)
+                passthrough_num = epoch_ndx - 1
+
+                # 1. Get the list of reconstruction file paths for the current passthrough
+                ng_train_paths = [self.files.get_recon_filepath(
+                                model_version=input_type,
+                                patient=patient,
+                                scan=scan,
+                                scan_type=st,
+                                gated=False,
+                                passthrough_num=passthrough_num
+                            ) for patient, scan, st in self.scans_agg_train]
+                ng_val_paths = [self.files.get_recon_filepath(
+                                model_version=input_type,
+                                patient=patient,
+                                scan=scan,
+                                scan_type=st,
+                                gated=False,
+                                passthrough_num=passthrough_num
+                            ) for patient, scan, st in self.scans_agg_val]
+
+                # 3. Aggregate and save the reconstructions from the file paths
+                augment_id = self.config['augment_id']
+                recon_ngcbct_agg_train = aggregate_saved_recons(ng_train_paths, augment=augment_id)
+
+                logger.info(f"Aggregated training data for epoch {epoch_ndx}: shape {recon_ngcbct_agg_train.shape}.")
+                np.save(ng_agg_path_train, recon_ngcbct_agg_train.numpy())
+                del recon_ngcbct_agg_train  # Free up memory
+                gc.collect()
+
+                # 4. Aggregate and save the validation reconstructions
+                recon_ngcbct_agg_val = aggregate_saved_recons(ng_val_paths, augment=augment_id)
+                logger.info(f"Aggregated validation data for epoch {epoch_ndx}: shape {recon_ngcbct_agg_val.shape}.")
+                np.save(ng_agg_path_val, recon_ngcbct_agg_val.numpy())
+                del recon_ngcbct_agg_val  # Free up memory
+                gc.collect()
+
+                # 5. Initialize the training dataloader using the file we just created
+                logger.info(f"Initializing training dataloaders for epoch {epoch_ndx}.")
+                train_dl = init_dataloader(self.config, self.files, "TRAIN", self.config["input_type"], self.config['domain'])
+                val_dl = init_dataloader(self.config, self.files, "VALIDATION", self.config["input_type"], self.config['domain'])
+
             logger.debug(
                 f"Learning rate is {self.scheduler.get_last_lr()[0]} at epoch {epoch_ndx}."
             )
@@ -569,6 +644,28 @@ class TrainingApp:
                         time.time() - epoch_val_start_time,
                     )
                 )
+
+            if self.scans_agg_train is not None:
+                # Delete the dataloaders to free up memory
+                del train_dl.dataset, val_dl.dataset
+                del train_dl, val_dl
+                gc.collect()
+
+                # Delete the aggregated files to free up memory
+                ng_agg_path_train = self.files.get_images_aggregate_filepath(self.config["input_type"], 'TRAIN', gated=False)
+                ng_agg_path_val = self.files.get_images_aggregate_filepath(self.config["input_type"], 'VALIDATION', gated=False)
+                if os.path.exists(ng_agg_path_train):
+                    try:
+                        os.remove(ng_agg_path_train)
+                        logger.debug(f"Removed aggregated training file: {ng_agg_path_train}")
+                    except Exception as e:
+                        logger.error(f"Error removing aggregated training file: {e}")
+                if os.path.exists(ng_agg_path_val):
+                    try:
+                        os.remove(ng_agg_path_val)
+                        logger.debug(f"Removed aggregated validation file: {ng_agg_path_val}")
+                    except Exception as e:
+                        logger.error(f"Error removing aggregated validation file: {e}")
 
             # Save model if needed (either at checkpoint or at end of training)
             if self.swag_enabled:

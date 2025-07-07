@@ -301,14 +301,20 @@ class PairNumpySetRAM(Dataset):
 
     def __getitem__(self, idx):
         # Load only the required slice
+        ################ RECALL DATA IS AGGREGATED LIKE THIS for tensor 2, so we need to simulate this for tensor 1
+        # if augment:
+        #     recon_agg[3 * i * recon.shape[0] : (3 * i + 1) * recon.shape[0], ...] = recon
+        #     recon_agg[(3 * i + 1) * recon.shape[0] : (3 * i + 2) * recon.shape[0], ...] = recon.flip(2)
+        #     recon_agg[(3 * i + 2) * recon.shape[0] : (3 * i + 3) * recon.shape[0], ...] = recon.flip(3)
+        ####################
         # For tensor 1, we simulate augmentation based on the index (so then we don't have to store the augmented tensor in RAM)
         if self.augment:
             if (idx // self.recon_len) % 3 == 0:
                 img1 = self.tensor_1[idx // 3].to(self.device)
             elif (idx // self.recon_len) % 3 == 1:
-                img1 = self.tensor_1[idx // 3].flip(2).to(self.device)
+                img1 = self.tensor_1[idx // 3].flip(1).to(self.device)
             else:
-                img1 = self.tensor_1[idx // 3].flip(3).to(self.device)
+                img1 = self.tensor_1[idx // 3].flip(2).to(self.device)
         else:
             img1 = self.tensor_1[idx].to(self.device)
         img2 = torch.tensor(self.tensor_2[idx]).to(self.device)

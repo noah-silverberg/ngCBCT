@@ -495,12 +495,12 @@ class TrainingApp:
                     ).detach()
 
                 # 3. Aggregate and save the reconstructions from the file paths
-                recon_ngcbct_agg_train = aggregate_saved_recons(ng_train_paths, augment=augment_id, out=recon_ngcbct_agg_train)
+                recon_ngcbct_agg_train = aggregate_saved_recons(ng_train_paths, augment=False, out=recon_ngcbct_agg_train)
 
                 logger.info(f"Aggregated training data for epoch {epoch_ndx}: shape {recon_ngcbct_agg_train.shape}.")
 
                 # 4. Aggregate and save the validation reconstructions
-                recon_ngcbct_agg_val = aggregate_saved_recons(ng_val_paths, augment=augment_id, out=recon_ngcbct_agg_val)
+                recon_ngcbct_agg_val = aggregate_saved_recons(ng_val_paths, augment=False, out=recon_ngcbct_agg_val)
                 logger.info(f"Aggregated validation data for epoch {epoch_ndx}: shape {recon_ngcbct_agg_val.shape}.")
 
                 # 5. Initialize the training dataloader using the file we just created

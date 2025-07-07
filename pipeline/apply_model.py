@@ -153,6 +153,7 @@ def apply_model_to_recons(
 
     if train_at_inference:
         # Set the model to train mode for MC dropout
+        logger.info("Running model in train mode for MC dropout.")
         model.train()
     else:
         # Set the model to eval mode for inference

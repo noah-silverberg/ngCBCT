@@ -293,7 +293,7 @@ class PairNumpySetRAM(Dataset):
         self.length = self.tensor_2.shape[0]  # Number of samples
         self.device = device
         self.augment = augment
-        self.recon_len = recon_len
+        self.recon_len = int(recon_len)
 
 
     def __len__(self):
@@ -309,12 +309,14 @@ class PairNumpySetRAM(Dataset):
         ####################
         # For tensor 1, we simulate augmentation based on the index (so then we don't have to store the augmented tensor in RAM)
         if self.augment:
+            slice_idx = idx % self.recon_len
+            vol_num = idx // (3 * self.recon_len)
             if (idx // self.recon_len) % 3 == 0:
-                img1 = self.tensor_1[idx // 3].to(self.device)
+                img1 = self.tensor_1[slice_idx + vol_num * self.recon_len].to(self.device)
             elif (idx // self.recon_len) % 3 == 1:
-                img1 = self.tensor_1[idx // 3].flip(1).to(self.device)
+                img1 = self.tensor_1[slice_idx + vol_num * self.recon_len].flip(1).to(self.device)
             else:
-                img1 = self.tensor_1[idx // 3].flip(2).to(self.device)
+                img1 = self.tensor_1[slice_idx + vol_num * self.recon_len].flip(2).to(self.device)
         else:
             img1 = self.tensor_1[idx].to(self.device)
         img2 = torch.tensor(self.tensor_2[idx]).to(self.device)

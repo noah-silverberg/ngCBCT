@@ -114,7 +114,7 @@ def init_tensorboard_writers(config: dict, time_str):
     return trn_writer, val_writer
 
 
-def init_dataloader(config: dict, files: Files, sample: str, input_type: str, domain: str, tensor: torch.Tensor = None):
+def init_dataloader(config: dict, files: Files, sample: str, input_type: str, domain: str, tensor: torch.Tensor = None, recon_len: int = None):
     """Initialize the DataLoader for a specific sample ('TRAIN', 'VALIDATION', or 'TEST')."""
     # Get the paths to the training data
     if domain == "PROJ":
@@ -131,7 +131,7 @@ def init_dataloader(config: dict, files: Files, sample: str, input_type: str, do
     if tensor is None:
         dataset = PairNumpySet(images_path, truth_images_path, device)
     else:
-        dataset = PairNumpySetRAM(tensor, truth_images_path, device)
+        dataset = PairNumpySetRAM(tensor, truth_images_path, device, config['augment_id'], recon_len)
     logger.debug(
         f"{sample} dataset loaded with {len(dataset)} samples, each with shape {dataset[0][0].shape}."
     )
@@ -485,13 +485,12 @@ class TrainingApp:
                     recon_shape = recon.shape
                     recon_dtype = recon.dtype
                     del recon
-                    factor = 3 if augment_id else 1
                     recon_ngcbct_agg_train = torch.empty(
-                        (factor * len(ng_train_paths) * recon_shape[0], recon_shape[1], recon_shape[2], recon_shape[3]),
+                        (len(ng_train_paths) * recon_shape[0], recon_shape[1], recon_shape[2], recon_shape[3]),
                         dtype=recon_dtype,
                     ).detach()
                     recon_ngcbct_agg_val = torch.empty(
-                        (factor * len(ng_val_paths) * recon_shape[0], recon_shape[1], recon_shape[2], recon_shape[3]),
+                        (len(ng_val_paths) * recon_shape[0], recon_shape[1], recon_shape[2], recon_shape[3]),
                         dtype=recon_dtype,
                     ).detach()
 
@@ -506,8 +505,8 @@ class TrainingApp:
 
                 # 5. Initialize the training dataloader using the file we just created
                 logger.info(f"Initializing training dataloaders for epoch {epoch_ndx}.")
-                train_dl = init_dataloader(self.config, self.files, "TRAIN", self.config["input_type"], self.config['domain'], tensor=recon_ngcbct_agg_train)
-                val_dl = init_dataloader(self.config, self.files, "VALIDATION", self.config["input_type"], self.config['domain'], tensor=recon_ngcbct_agg_val)
+                train_dl = init_dataloader(self.config, self.files, "TRAIN", self.config["input_type"], self.config['domain'], tensor=recon_ngcbct_agg_train, recon_len=recon_ngcbct_agg_train.shape[0] / len(ng_train_paths))
+                val_dl = init_dataloader(self.config, self.files, "VALIDATION", self.config["input_type"], self.config['domain'], tensor=recon_ngcbct_agg_val, recon_len=recon_ngcbct_agg_val.shape[0] / len(ng_val_paths))
 
             logger.debug(
                 f"Learning rate is {self.scheduler.get_last_lr()[0]} at epoch {epoch_ndx}."

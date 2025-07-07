@@ -283,20 +283,33 @@ class PairNumpySet(Dataset):
         return img1, img2  # Return as a paired sample
 
 class PairNumpySetRAM(Dataset):
-    def __init__(self, tensor_1, tensor_2_path, device):
+    def __init__(self, tensor_1, tensor_2_path, device, augment, recon_len):
         # Load only metadata (not full tensors)
         self.tensor_1 = tensor_1
         self.tensor_2 = np.load(tensor_2_path, mmap_mode="r")
-        if self.tensor_1.shape != self.tensor_2.shape:
+        factor = 3 if augment else 1
+        if self.tensor_1.shape[0] * factor != self.tensor_2.shape[0] or self.tensor_1.shape[1:] != self.tensor_2.shape[1:]:
             raise ValueError("Tensors must have the same shape.")
-        self.length = self.tensor_1.shape[0]  # Number of samples
+        self.length = self.tensor_2.shape[0]  # Number of samples
         self.device = device
+        self.augment = augment
+        self.recon_len = recon_len
+
 
     def __len__(self):
         return self.length
 
     def __getitem__(self, idx):
         # Load only the required slice
-        img1 = self.tensor_1[idx].to(self.device)
+        # For tensor 1, we simulate augmentation based on the index (so then we don't have to store the augmented tensor in RAM)
+        if self.augment:
+            if (idx // self.recon_len) % 3 == 0:
+                img1 = self.tensor_1[idx // 3].to(self.device)
+            elif (idx // self.recon_len) % 3 == 1:
+                img1 = self.tensor_1[idx // 3].flip(2).to(self.device)
+            else:
+                img1 = self.tensor_1[idx // 3].flip(3).to(self.device)
+        else:
+            img1 = self.tensor_1[idx].to(self.device)
         img2 = torch.tensor(self.tensor_2[idx]).to(self.device)
         return img1, img2  # Return as a paired sample

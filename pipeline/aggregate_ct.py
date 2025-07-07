@@ -7,7 +7,7 @@ from pipeline.dsets import normalizeInputsClip
 logger = logging.getLogger("pipeline")
 
 
-def aggregate_saved_recons(paths: list[str], augment: bool):
+def aggregate_saved_recons(paths: list[str], augment: bool, out: torch.Tensor = None):
     """
     Load per-scan reconstruction tensors, concatenate across scans, and save aggregates.
 
@@ -28,18 +28,21 @@ def aggregate_saved_recons(paths: list[str], augment: bool):
         recon = torch.unsqueeze(recon, 1)
 
         if i == 0:
-            # Allocate an empty tensor for the aggregated reconstructions
-            # We assume all reconstructions have the same shape
-            if augment:
-                recon_agg = torch.empty(
-                    (3 * len(paths) * recon.shape[0], recon.shape[1], recon.shape[2], recon.shape[3]),
-                    dtype=recon.dtype,
-                ).detach()
+            if out is not None:
+                recon_agg = out
             else:
-                recon_agg = torch.empty(
-                    (len(paths) * recon.shape[0], recon.shape[1], recon.shape[2], recon.shape[3]),
-                    dtype=recon.dtype,
-                ).detach()
+                # Allocate an empty tensor for the aggregated reconstructions
+                # We assume all reconstructions have the same shape
+                if augment:
+                    recon_agg = torch.empty(
+                        (3 * len(paths) * recon.shape[0], recon.shape[1], recon.shape[2], recon.shape[3]),
+                        dtype=recon.dtype,
+                    ).detach()
+                else:
+                    recon_agg = torch.empty(
+                        (len(paths) * recon.shape[0], recon.shape[1], recon.shape[2], recon.shape[3]),
+                        dtype=recon.dtype,
+                    ).detach()
 
         # Fill the allocated tensor with the loaded reconstructions
         if augment:

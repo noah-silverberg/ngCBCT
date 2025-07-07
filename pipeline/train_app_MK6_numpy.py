@@ -488,11 +488,11 @@ class TrainingApp:
                     recon_ngcbct_agg_train = torch.empty(
                         (len(ng_train_paths) * recon_shape[0], recon_shape[1], recon_shape[2], recon_shape[3]),
                         dtype=recon_dtype,
-                    ).detach()
+                    ).detach().to(device)
                     recon_ngcbct_agg_val = torch.empty(
                         (len(ng_val_paths) * recon_shape[0], recon_shape[1], recon_shape[2], recon_shape[3]),
                         dtype=recon_dtype,
-                    ).detach()
+                    ).detach().to(device)
 
                 # 3. Aggregate and save the reconstructions from the file paths
                 recon_ngcbct_agg_train = aggregate_saved_recons(ng_train_paths, augment=False, out=recon_ngcbct_agg_train)

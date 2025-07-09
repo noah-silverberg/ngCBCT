@@ -304,7 +304,7 @@ class TrainingApp:
             # Set up the SWAG optimizer
             logger.info("Initializing new SGD optimizer for SWAG.")
             # Use a new SGD optimizer for the burn-in and SWA phases
-            self.optimizer = SGD(self.model.parameters(), lr=self.config['swag_lr'], momentum=self.config['swag_momentum'], weight_decay=self.config['swag_weight_decay'])
+            self.optimizer = SGD(swag_params, lr=self.config['swag_lr'], momentum=self.config['swag_momentum'], weight_decay=self.config['swag_weight_decay'])
             
             # Use constant learning rate scheduler for SWAG
             self.scheduler = torch.optim.lr_scheduler.ConstantLR(

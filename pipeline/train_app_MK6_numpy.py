@@ -386,8 +386,10 @@ class TrainingApp:
                     
                     train_loss = reconstruction_loss + self.config['beta_BBB'] * kl_loss
 
-                    if batch_idx % 500 == 0:
-                        logger.debug(f"Epoch {epoch_ndx}, Batch {batch_idx}: Total Loss: {train_loss.item():.2f}, NLL: {reconstruction_loss.item():.2f}, KL Term: {kl_term.item():.2f}")
+                    if batch_idx % 50 == 0:
+                        logger.debug(f"Epoch {epoch_ndx}, Batch {batch_idx}: Total Loss: {train_loss.item():.2f}, SmoothL1Loss: {reconstruction_loss.item():.2f}, KL Term: {kl_loss.item():.2f}")
+                        # Print out mean reduction loss
+                        logger.debug(f"Epoch {epoch_ndx}, Batch {batch_idx}: Mean Reconstruction Loss: {nn.SmoothL1Loss(reduction='mean')(train_outputs, train_truths).item():.6f}")
                 else:
                     # Standard loss for a deterministic model
                     train_loss = self.criterion(train_outputs, train_truths)

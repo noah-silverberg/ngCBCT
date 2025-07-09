@@ -46,9 +46,9 @@ ID_settings:
   training_app: "train_app_MK6_numpy.TrainingApp"
   epochs: 50
   learning_rate: 1e-3
-  network_name: "IResNet"
-  network_kwargs: {}
-  model_version: "MK7_01"
+  network_name: "IResNetBBB"
+  network_kwargs: {'prior_pi' : 0.5, 'prior_mu' : 0.0, 'prior_sigma1' : 1e-1, 'prior_sigma2' : 1e-3}
+  model_version: "MK7_BBB_pi0.5_mu_0.0_sigma1_1e-1_sigma2_1e-3"
   batch_size: 8
   optimizer: "NAdam"
   num_workers: 0
@@ -62,16 +62,16 @@ ID_settings:
   checkpoint_save_step: 1
   tensor_board: false
   tensor_board_comment: ""
-  train_at_inference: false
+  train_at_inference: true
   ensemble_size: 1
   scan_type: "HF"
-  input_type: "MK7_01" # Input type for ID training, i.e., PL or some trained & reconstructed PD model name
+  input_type: "MK7_MCDROPOUT_30_pct_NEW" # Input type for ID training, i.e., PL or some trained & reconstructed PD model name
   input_type_match_ensemble: true # When training an ensemble, whether the input type should have an extra identifier (e.g., _01) which matches the ID model name
-  passthrough_count: 1
-  is_bayesian: false
-  beta_BBB: 1e-2
+  passthrough_count: 50
+  is_bayesian: true
+  beta_BBB: 1e-4
 
-  swag_enabled: true
+  swag_enabled: false
   swag_model_version: 'MK7_SWAG_TEST' # The model version to load
   swag_start_model_version: 'MK7_01' # The model version to start from for SWA
   swag_start_checkpoint_epoch: 50 # The checkpoint epoch to load from that model
@@ -79,3 +79,5 @@ ID_settings:
   swag_swa_epochs: 1 # Number of epochs to perform SWA
   swag_lr: 1e-4 # Constant learning rate for SWA epochs
   swag_cov_mat_rank: 1 # Rank of the SWAG covariance matrix
+  swag_momentum: 0.0
+  swag_weight_decay: 1e-4

@@ -262,6 +262,15 @@ class TrainingApp:
             self.model.load_state_dict(checkpoint['state_dict'])
             logger.info(f"Loaded checkpoint from epoch {checkpoint['epoch']} of model '{start_model_version}'.")
 
+            # Manually set all dropout layers to zero
+            for module in self.model.modules():
+                if isinstance(module, (nn.Dropout, nn.Dropout2d, nn.Dropout3d)):
+                    module.p = 0.0
+                    logger.debug(f"Set dropout layer {module} to zero.")
+
+            # Print out model summary
+            logger.debug(self.model)
+
             # 1. Define the layers you want to freeze during SWAG training.
             # These are the names of the attributes in your IResNet class definition.
             layers_to_freeze = ['conv1', 'conv1_extra', 'up2', 'up_conv2', 'conv_1x1']

@@ -6,6 +6,7 @@ import math
 import ast
 from tqdm import tqdm
 import copy
+import torch.distributions as distributions
 
 
 def init_weights(net, init_type='normal', gain=0.02):
@@ -1141,187 +1142,6 @@ class BayesianConv2d(BayesianLayer):
         prior = f', prior_mu={self.prior_mu}, prior_sigma={self.prior_sigma}'
         return base + prior
 
-# --- Bayesian versions of the building blocks ---
-
-class BayesianSingleConv(nn.Module):
-    def __init__(self, ch_in, ch_out, prior_mu=0, prior_sigma=1e-2):
-        super(BayesianSingleConv, self).__init__()
-        self.conv = nn.Sequential(
-            BayesianConv2d(ch_in, ch_out, kernel_size=3, stride=1, padding=1, bias=True, prior_mu=prior_mu, prior_sigma=prior_sigma),
-            nn.InstanceNorm2d(ch_out),
-            nn.ReLU(inplace=True)
-        )
-    def forward(self, x):
-        return self.conv(x)
-
-class BayesianConvBlock(nn.Module):
-    def __init__(self, ch_in, ch_out, prior_mu=0, prior_sigma=1e-2):
-        super(BayesianConvBlock, self).__init__()
-        self.conv = nn.Sequential(
-            BayesianConv2d(ch_in, ch_out, kernel_size=3, stride=1, padding=1, bias=True, prior_mu=prior_mu, prior_sigma=prior_sigma),
-            nn.InstanceNorm2d(ch_out),
-            nn.ReLU(inplace=True),
-            BayesianConv2d(ch_out, ch_out, kernel_size=3, stride=1, padding=1, bias=True, prior_mu=prior_mu, prior_sigma=prior_sigma),
-            nn.InstanceNorm2d(ch_out),
-            nn.ReLU(inplace=True)
-        )
-    def forward(self, x):
-        return self.conv(x)
-
-class BayesianUpConvBlock(nn.Module):
-    # NOTE: Using deterministic ConvTranspose2d as it's typically not a major source of uncertainty
-    # and Bayesian ConvTranspose2d can be complex to implement correctly.
-    def __init__(self, ch_in, ch_out, up_conv, prior_mu=0, prior_sigma=1e-2):
-        super(BayesianUpConvBlock, self).__init__()
-        if up_conv:
-            self.up = nn.Sequential(
-                nn.ConvTranspose2d(ch_in, ch_out, kernel_size=3, stride=2, padding=1, output_padding=1),
-                nn.InstanceNorm2d(ch_out),
-                nn.ReLU(inplace=True)
-            )
-        else:
-            # Upsample is deterministic, but the following conv should be Bayesian
-            self.up = nn.Sequential(
-                nn.Upsample(scale_factor=2),
-                BayesianConv2d(ch_in, ch_out, kernel_size=3, stride=1, padding=1, bias=True, prior_mu=prior_mu, prior_sigma=prior_sigma),
-                nn.InstanceNorm2d(ch_out),
-                nn.ReLU(inplace=True)
-            )
-    def forward(self, x):
-        return self.up(x)
-        
-class BayesianResidualBlock_mod(nn.Module):
-    def __init__(self, ch_in, prior_mu=0, prior_sigma=1e-2):
-        super(BayesianResidualBlock_mod, self).__init__()
-        self.block = nn.Sequential(
-            nn.ReflectionPad2d(1),
-            BayesianConv2d(ch_in, ch_in, 3, prior_mu=prior_mu, prior_sigma=prior_sigma),
-            nn.InstanceNorm2d(ch_in),
-            nn.ReLU(inplace=True),
-            nn.ReflectionPad2d(1),
-            BayesianConv2d(ch_in, ch_in, 3, prior_mu=prior_mu, prior_sigma=prior_sigma),
-            nn.InstanceNorm2d(ch_in)
-        )
-        self.relu = nn.ReLU(inplace=True)
-    def forward(self, x):
-        y = x + self.block(x)
-        y1 = self.relu(y)
-        return y1
-
-    def extra_repr(self):
-        # Try to extract prior_mu and prior_sigma from the first BayesianConv2d
-        for m in self.block:
-            if isinstance(m, BayesianConv2d):
-                return f'prior_mu={m.prior_mu}, prior_sigma={m.prior_sigma}'
-        return ''
-
-class IResNetBBB(nn.Module):
-    def __init__(self, img_ch=1, output_ch=1, prior_mu=0, prior_sigma=1e-2):
-        super(IResNetBBB, self).__init__()
-
-        if isinstance(prior_mu, str):
-            prior_mu = ast.literal_eval(prior_mu)
-        if isinstance(prior_sigma, str):
-            prior_sigma = ast.literal_eval(prior_sigma)
-
-        up_conv = True
-
-        self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
-
-        self.conv1 = ConvBlock(ch_in=img_ch, ch_out=64)
-        self.conv1_extra = SingleConv(ch_in=64, ch_out=64)
-        self.conv2 = BayesianConvBlock(ch_in=64, ch_out=128, prior_mu=prior_mu, prior_sigma=prior_sigma)
-        self.conv3 = BayesianConvBlock(ch_in=128, ch_out=256, prior_mu=prior_mu, prior_sigma=prior_sigma)
-        self.conv4 = BayesianConvBlock(ch_in=256, ch_out=512, prior_mu=prior_mu, prior_sigma=prior_sigma)
-        self.conv5 = BayesianConvBlock(ch_in=512, ch_out=1024, prior_mu=prior_mu, prior_sigma=prior_sigma)
-
-        self.resnet = BayesianResidualBlock_mod(ch_in=1024, prior_mu=prior_mu, prior_sigma=prior_sigma)
-
-        self.up5 = BayesianUpConvBlock(ch_in=1024, ch_out=512, up_conv=up_conv, prior_mu=prior_mu, prior_sigma=prior_sigma)
-        self.up_conv5 = BayesianConvBlock(ch_in=1024, ch_out=512, prior_mu=prior_mu, prior_sigma=prior_sigma)
-        self.up4 = BayesianUpConvBlock(ch_in=512, ch_out=256, up_conv=up_conv, prior_mu=prior_mu, prior_sigma=prior_sigma)
-        self.up_conv4 = BayesianConvBlock(ch_in=512, ch_out=256, prior_mu=prior_mu, prior_sigma=prior_sigma)
-        self.up3 = BayesianUpConvBlock(ch_in=256, ch_out=128, up_conv=up_conv, prior_mu=prior_mu, prior_sigma=prior_sigma)
-        self.up_conv3 = BayesianConvBlock(ch_in=256, ch_out=128, prior_mu=prior_mu, prior_sigma=prior_sigma)
-        self.up2 = UpConvBlock(ch_in=128, ch_out=64, up_conv=up_conv)
-        self.up_conv2 = ConvBlock(ch_in=128, ch_out=64)
-
-        # Final layer is often kept deterministic, but can be Bayesian as well
-        self.conv_1x1 = nn.Conv2d(64, output_ch, kernel_size=1, stride=1, padding=0)
-
-    def forward(self, input):
-        # encoding path
-        e1 = self.conv1(input)
-        e1 = self.conv1_extra(e1)
-
-        e2 = self.maxpool(e1)
-        e2 = self.conv2(e2)
-
-        e3 = self.maxpool(e2)
-        e3 = self.conv3(e3)
-
-        e4 = self.maxpool(e3)
-        e4 = self.conv4(e4)
-
-        e5 = self.maxpool(e4)
-        e5 = self.conv5(e5)
-
-        # ResNet Blocks
-        r1 = self.resnet(e5)
-        r2 = self.resnet(r1)
-        r3 = self.resnet(r2)
-        r4 = self.resnet(r3)
-        r5 = self.resnet(r4)
-        r6 = self.resnet(r5)
-        r7 = self.resnet(r6)
-
-        # decoding + concat path
-        d5 = self.up5(r7)
-        d5 = torch.cat((e4, d5), dim=1)
-        d5 = self.up_conv5(d5)
-
-        d4 = self.up4(d5)
-        d4 = torch.cat((e3, d4), dim=1)
-        d4 = self.up_conv4(d4)
-
-        d3 = self.up3(d4)
-        d3 = torch.cat((e2, d3), dim=1)
-        d3 = self.up_conv3(d3)
-
-        d2 = self.up2(d3)
-        d2 = torch.cat((e1, d2), dim=1)
-        d2 = self.up_conv2(d2)
-
-        d1 = self.conv_1x1(d2)
-
-        # additional skip connection between input and output
-        result = input + d1
-
-        return result
-
-    def kl_divergence(self):
-        """
-        Calculates the total KL divergence of the model by summing the KL
-        of all `BayesianLayer` modules.
-        """
-        total_kl = 0
-        for module in self.modules():
-            if isinstance(module, BayesianLayer):
-                # The KL divergence of each layer is computed and stored during the forward pass.
-                # Here we just sum them up.
-                total_kl += module.kl_divergence
-        return total_kl
-
-    def extra_repr(self):
-        # Show prior_mu and prior_sigma for all Bayesian layers in the model
-        priors = []
-        for name, module in self.named_modules():
-            if isinstance(module, BayesianLayer):
-                priors.append(f"{name}: prior_mu={module.prior_mu}, prior_sigma={module.prior_sigma}")
-        if priors:
-            return "Bayesian Priors:\n  " + "\n  ".join(priors)
-        return ""
-    
 def flatten(lst):
     tmp = [i.contiguous().view(-1, 1) for i in lst]
     return torch.cat(tmp).view(-1)
@@ -1468,3 +1288,303 @@ class SWAG(nn.Module):
 
         for (module, name), sample in zip(self.params, samples_list):
             module.register_parameter(name, nn.Parameter(sample))
+
+
+
+# =================================================================
+# Helper Functions for Probability Distributions
+# =================================================================
+
+def log_gaussian_prob(x, mu, rho):
+    """
+    Calculates the log probability of a value 'x' under a Gaussian distribution.
+    The standard deviation (sigma) is derived from 'rho' to ensure it's positive.
+    sigma = log(1 + exp(rho))
+    """
+    sigma = torch.nn.functional.softplus(rho)  # Ensures sigma is positive
+    # log N(x | mu, sigma^2)
+    return distributions.Normal(mu, sigma).log_prob(x)
+
+def log_scale_mixture_gaussian_prob(x, pi, mu, sigma1, sigma2):
+    """
+    Calculates the log probability of a value 'x' under a scale mixture of two
+    Gaussian distributions.
+    p(x) = pi * N(x | mu, sigma1^2) + (1 - pi) * N(x | mu, sigma2^2)
+    Uses the log-sum-exp trick for numerical stability.
+    """
+    # Log probabilities for each component of the mixture
+    log_prob1 = distributions.Normal(mu, sigma1).log_prob(x)
+    log_prob2 = distributions.Normal(mu, sigma2).log_prob(x)
+
+    # Combine using log-sum-exp: log(exp(a) + exp(b))
+    log_mix_prob = torch.logsumexp(
+        torch.stack([torch.log(pi) + log_prob1, torch.log(1 - pi) + log_prob2]),
+        dim=0
+    )
+    return log_mix_prob
+
+# =================================================================
+# Bayes by Backprop (BBB) Implementation
+# =================================================================
+
+class BayesianLayer(nn.Module):
+    """
+    Base class for a Bayesian layer. It defines the scale mixture Gaussian prior
+    and the logic for calculating the KL divergence term via sampling.
+    The KL divergence is approximated as log(q(w|D)) - log(p(w)).
+    """
+    def __init__(self, prior_pi=0.5, prior_sigma1=1.0, prior_sigma2=0.001, prior_mu=0.0):
+        super().__init__()
+        # Register prior parameters as buffers to ensure they are moved to the correct device
+        self.register_buffer('prior_pi', torch.tensor(float(prior_pi)))
+        self.register_buffer('prior_sigma1', torch.tensor(float(prior_sigma1)))
+        self.register_buffer('prior_sigma2', torch.tensor(float(prior_sigma2)))
+        self.register_buffer('prior_mu', torch.tensor(float(prior_mu)))
+
+        # Placeholders for the log probabilities of the sampled weights
+        self.log_q = 0  # Log probability of the weights under the posterior q
+        self.log_p = 0  # Log probability of the weights under the prior p
+
+    def log_prob_prior(self, w):
+        """Calculates the log probability of the weights 'w' under the mixture prior."""
+        return log_scale_mixture_gaussian_prob(w, self.prior_pi, self.prior_mu, self.prior_sigma1, self.prior_sigma2)
+
+    def log_prob_posterior(self, w, mu, rho):
+        """Calculates the log probability of the weights 'w' under the posterior."""
+        return log_gaussian_prob(w, mu, rho)
+
+    def get_kl_divergence_term(self):
+        """Returns the calculated KL divergence term: log(q) - log(p)."""
+        return self.log_q - self.log_p
+
+    def extra_repr(self):
+        return f'prior_pi={self.prior_pi.item():.2f}, prior_mu={self.prior_mu.item()}, prior_sigma1={self.prior_sigma1.item():.4f}, prior_sigma2={self.prior_sigma2.item():.4f}'
+
+
+class BayesianConv2d(BayesianLayer):
+    """
+    Bayesian Convolutional Layer using the reparameterization trick and sampling-based KL.
+    """
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, bias=True,
+                 prior_pi=0.5, prior_sigma1=1.0, prior_sigma2=0.001, prior_mu=0.0):
+        super().__init__(prior_pi, prior_sigma1, prior_sigma2, prior_mu)
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_size = (kernel_size, kernel_size)
+        self.stride = stride
+        self.padding = padding
+        self.has_bias = bias
+
+        # Posterior parameters for weights (mu and rho for the Gaussian)
+        self.weight_mu = nn.Parameter(torch.Tensor(out_channels, in_channels, *self.kernel_size))
+        self.weight_rho = nn.Parameter(torch.Tensor(out_channels, in_channels, *self.kernel_size))
+
+        if self.has_bias:
+            self.bias_mu = nn.Parameter(torch.Tensor(out_channels))
+            self.bias_rho = nn.Parameter(torch.Tensor(out_channels))
+        else:
+            self.register_parameter('bias_mu', None)
+            self.register_parameter('bias_rho', None)
+
+        self._reset_parameters()
+
+    def _reset_parameters(self):
+        # Initialize posterior means similar to a standard Conv2d layer
+        nn.init.kaiming_uniform_(self.weight_mu, a=math.sqrt(5))
+        # Initialize rho to a small negative value for low initial variance
+        nn.init.constant_(self.weight_rho, -5.0)
+        if self.has_bias:
+            fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight_mu)
+            bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
+            nn.init.uniform_(self.bias_mu, -bound, bound)
+            nn.init.constant_(self.bias_rho, -5.0)
+
+    def forward(self, x):
+        # --- Sample weights and bias from their posteriors using the reparameterization trick ---
+        # 1. Get standard deviation from rho
+        weight_sigma = torch.nn.functional.softplus(self.weight_rho)
+        # 2. Sample from a standard normal
+        epsilon_w = torch.randn_like(weight_sigma)
+        # 3. Compute the sampled weight
+        weight = self.weight_mu + weight_sigma * epsilon_w
+
+        if self.has_bias:
+            bias_sigma = torch.nn.functional.softplus(self.bias_rho)
+            epsilon_b = torch.randn_like(bias_sigma)
+            bias = self.bias_mu + bias_sigma * epsilon_b
+        else:
+            bias = None
+
+        # --- Calculate log probabilities for the KL term ---
+        # log q(w|D)
+        self.log_q = self.log_prob_posterior(weight, self.weight_mu, self.weight_rho).sum()
+        # log p(w)
+        self.log_p = self.log_prob_prior(weight).sum()
+
+        if self.has_bias:
+            self.log_q += self.log_prob_posterior(bias, self.bias_mu, self.bias_rho).sum()
+            self.log_p += self.log_prob_prior(bias).sum()
+
+        # --- Perform the convolution with the sampled weights ---
+        return F.conv2d(x, weight, bias, self.stride, self.padding)
+
+    def extra_repr(self):
+        base = f'in_channels={self.in_channels}, out_channels={self.out_channels}, kernel_size={self.kernel_size}, stride={self.stride}, padding={self.padding}, bias={self.has_bias}'
+        prior_info = super().extra_repr()
+        return f'{base}, {prior_info}'
+
+
+# --- Bayesian versions of the U-Net building blocks ---
+
+class BayesianConvBlock(nn.Module):
+    def __init__(self, ch_in, ch_out, **prior_kwargs):
+        super(BayesianConvBlock, self).__init__()
+        self.conv = nn.Sequential(
+            BayesianConv2d(ch_in, ch_out, kernel_size=3, stride=1, padding=1, bias=True, **prior_kwargs),
+            nn.InstanceNorm2d(ch_out),
+            nn.ReLU(inplace=True),
+            BayesianConv2d(ch_out, ch_out, kernel_size=3, stride=1, padding=1, bias=True, **prior_kwargs),
+            nn.InstanceNorm2d(ch_out),
+            nn.ReLU(inplace=True)
+        )
+    def forward(self, x):
+        return self.conv(x)
+
+class BayesianUpConvBlock(nn.Module):
+    def __init__(self, ch_in, ch_out, up_conv, **prior_kwargs):
+        super(BayesianUpConvBlock, self).__init__()
+        # Using a deterministic ConvTranspose2d for simplicity
+        # The subsequent convolutional blocks will be Bayesian.
+        if up_conv:
+            self.up = nn.Sequential(
+                nn.ConvTranspose2d(ch_in, ch_out, kernel_size=3, stride=2, padding=1, output_padding=1),
+                nn.InstanceNorm2d(ch_out),
+                nn.ReLU(inplace=True)
+            )
+        else:
+            # Upsample is deterministic, but the following conv should be Bayesian
+            self.up = nn.Sequential(
+                nn.Upsample(scale_factor=2),
+                BayesianConv2d(ch_in, ch_out, kernel_size=3, stride=1, padding=1, bias=True, **prior_kwargs),
+                nn.InstanceNorm2d(ch_out),
+                nn.ReLU(inplace=True)
+            )
+    def forward(self, x):
+        return self.up(x)
+
+class BayesianResidualBlock_mod(nn.Module):
+    def __init__(self, ch_in, **prior_kwargs):
+        super(BayesianResidualBlock_mod, self).__init__()
+        self.block = nn.Sequential(
+            nn.ReflectionPad2d(1),
+            BayesianConv2d(ch_in, ch_in, 3, **prior_kwargs),
+            nn.InstanceNorm2d(ch_in),
+            nn.ReLU(inplace=True),
+            nn.ReflectionPad2d(1),
+            BayesianConv2d(ch_in, ch_in, 3, **prior_kwargs),
+            nn.InstanceNorm2d(ch_in)
+        )
+        self.relu = nn.ReLU(inplace=True)
+    def forward(self, x):
+        y = x + self.block(x)
+        y1 = self.relu(y)
+        return y1
+
+
+class IResNetBBB(nn.Module):
+    def __init__(self, img_ch=1, output_ch=1, **prior_kwargs):
+        super(IResNetBBB, self).__init__()
+
+        # This architecture keeps the first and last few layers deterministic,
+        up_conv = True
+
+        self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
+
+        # --- Deterministic Entry Layers ---
+        self.conv1 = ConvBlock(ch_in=img_ch, ch_out=64)
+        self.conv1_extra = SingleConv(ch_in=64, ch_out=64)
+
+        # --- Bayesian Encoding Layers ---
+        self.conv2 = BayesianConvBlock(ch_in=64, ch_out=128, **prior_kwargs)
+        self.conv3 = BayesianConvBlock(ch_in=128, ch_out=256, **prior_kwargs)
+        self.conv4 = BayesianConvBlock(ch_in=256, ch_out=512, **prior_kwargs)
+        self.conv5 = BayesianConvBlock(ch_in=512, ch_out=1024, **prior_kwargs)
+
+        # --- Bayesian Bottleneck ---
+        self.resnet = BayesianResidualBlock_mod(ch_in=1024, **prior_kwargs)
+
+        # --- Bayesian Decoding Layers ---
+        self.up5 = BayesianUpConvBlock(ch_in=1024, ch_out=512, up_conv=up_conv, **prior_kwargs)
+        self.up_conv5 = BayesianConvBlock(ch_in=1024, ch_out=512, **prior_kwargs)
+        self.up4 = BayesianUpConvBlock(ch_in=512, ch_out=256, up_conv=up_conv, **prior_kwargs)
+        self.up_conv4 = BayesianConvBlock(ch_in=512, ch_out=256, **prior_kwargs)
+        self.up3 = BayesianUpConvBlock(ch_in=256, ch_out=128, up_conv=up_conv, **prior_kwargs)
+        self.up_conv3 = BayesianConvBlock(ch_in=256, ch_out=128, **prior_kwargs)
+
+        # --- Deterministic Exit Layers ---
+        self.up2 = UpConvBlock(ch_in=128, ch_out=64, up_conv=up_conv)
+        self.up_conv2 = ConvBlock(ch_in=128, ch_out=64)
+        self.conv_1x1 = nn.Conv2d(64, output_ch, kernel_size=1, stride=1, padding=0)
+
+    def forward(self, input):
+        # encoding path
+        e1 = self.conv1(input)
+        e1 = self.conv1_extra(e1)
+
+        e2 = self.maxpool(e1)
+        e2 = self.conv2(e2)
+
+        e3 = self.maxpool(e2)
+        e3 = self.conv3(e3)
+
+        e4 = self.maxpool(e3)
+        e4 = self.conv4(e4)
+
+        e5 = self.maxpool(e4)
+        e5 = self.conv5(e5)
+
+        # ResNet Blocks
+        r1 = self.resnet(e5)
+        r2 = self.resnet(r1)
+        r3 = self.resnet(r2)
+        r4 = self.resnet(r3)
+        r5 = self.resnet(r4)
+        r6 = self.resnet(r5)
+        r7 = self.resnet(r6)
+
+        # decoding + concat path
+        d5 = self.up5(r7)
+        d5 = torch.cat((e4, d5), dim=1)
+        d5 = self.up_conv5(d5)
+
+        d4 = self.up4(d5)
+        d4 = torch.cat((e3, d4), dim=1)
+        d4 = self.up_conv4(d4)
+
+        d3 = self.up3(d4)
+        d3 = torch.cat((e2, d3), dim=1)
+        d3 = self.up_conv3(d3)
+
+        d2 = self.up2(d3)
+        d2 = torch.cat((e1, d2), dim=1)
+        d2 = self.up_conv2(d2)
+
+        d1 = self.conv_1x1(d2)
+
+        # additional skip connection between input and output
+        result = input + d1
+
+        return result
+
+    def kl_divergence(self):
+        """
+        Calculates the total KL divergence term for the model loss.
+        It sums the 'log(q) - log(p)' from all BayesianLayer modules.
+        """
+        total_kl_term = 0
+        for module in self.modules():
+            if isinstance(module, BayesianLayer):
+                # The KL term of each layer is computed during the forward pass.
+                # Here we just sum them up.
+                total_kl_term += module.get_kl_divergence_term()
+        return total_kl_term

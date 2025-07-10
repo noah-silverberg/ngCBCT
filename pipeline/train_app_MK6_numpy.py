@@ -561,7 +561,8 @@ class TrainingApp:
             del self.criterion
             del train_inputs, train_truths
             del val_inputs, val_truths
-            del train_dl, val_dl
+            if self.scans_agg_train is None:
+                del train_dl, val_dl
             del train_outputs, val_outputs
             del train_loss, val_loss
             del epoch_total_train_loss, epoch_total_val_loss

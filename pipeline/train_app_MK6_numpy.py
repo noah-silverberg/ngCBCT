@@ -10,7 +10,7 @@ from torch.utils.tensorboard import SummaryWriter
 import torch
 import torch.nn as nn
 from torch.optim import SGD, Adam, NAdam
-from .dsets import PairNumpySet, PairNumpySetRAM, normalizeInputsClip
+from .dsets import PairNumpySet, normalizeInputsClip
 from . import network_instance
 import logging
 from tqdm import tqdm
@@ -121,7 +121,7 @@ def init_tensorboard_writers(config: dict, time_str):
     return trn_writer, val_writer
 
 
-def init_dataloader(config: dict, files: Files, sample: str, input_type: str, domain: str, tensor: torch.Tensor = None, recon_len: int = None):
+def init_dataloader(config: dict, files: Files, sample: str, input_type: str, domain: str, augment_on_fly: bool = False, recon_len: int = None):
     """Initialize the DataLoader for a specific sample ('TRAIN', 'VALIDATION', or 'TEST')."""
     # Get the paths to the training data
     if domain == "PROJ":
@@ -135,10 +135,7 @@ def init_dataloader(config: dict, files: Files, sample: str, input_type: str, do
     logger.debug(f"{sample} ground truth images path: {truth_images_path}")
 
     # Load the dataset
-    if tensor is None:
-        dataset = PairNumpySet(images_path, truth_images_path, device)
-    else:
-        dataset = PairNumpySetRAM(tensor, truth_images_path, device, config['augment_id'], recon_len)
+    dataset = PairNumpySet(images_path, truth_images_path, device, augment_on_fly, recon_len)
     logger.debug(
         f"{sample} dataset loaded with {len(dataset)} samples, each with shape {dataset[0][0].shape}."
     )
@@ -306,39 +303,23 @@ class TrainingApp:
                                 gated=False,
                                 passthrough_num=passthrough_num
                             ) for patient, scan, st in self.scans_agg_val]
-                
-                augment_id = self.config['augment_id']
-                
-                if epoch_ndx == self.start_epoch:
-                    # Allocate the empty tensors for the aggregated reconstructions
-                    recon = torch.load(ng_train_paths[0]).detach().float()
-                    recon = normalizeInputsClip(recon)
-                    recon = torch.unsqueeze(recon, 1)
-                    recon_shape = recon.shape
-                    recon_dtype = recon.dtype
-                    del recon
-                    recon_ngcbct_agg_train = torch.empty(
-                        (len(ng_train_paths) * recon_shape[0], recon_shape[1], recon_shape[2], recon_shape[3]),
-                        dtype=recon_dtype,
-                    ).detach().to(device)
-                    recon_ngcbct_agg_val = torch.empty(
-                        (len(ng_val_paths) * recon_shape[0], recon_shape[1], recon_shape[2], recon_shape[3]),
-                        dtype=recon_dtype,
-                    ).detach().to(device)
 
                 # 3. Aggregate and save the reconstructions from the file paths
-                recon_ngcbct_agg_train = aggregate_saved_recons(ng_train_paths, augment=False, out=recon_ngcbct_agg_train)
-
-                logger.info(f"Aggregated training data for epoch {epoch_ndx}: shape {recon_ngcbct_agg_train.shape}.")
+                recon_ngcbct_agg_train = aggregate_saved_recons(ng_train_paths, augment=False)
+                np.save(self.files.get_images_aggregate_filepath(input_type, "TRAIN", gated=False), recon_ngcbct_agg_train.numpy())
+                logger.info(f"Aggregated and saved training data for epoch {epoch_ndx}: shape {recon_ngcbct_agg_train.shape}.")
+                del recon_ngcbct_agg_train
 
                 # 4. Aggregate and save the validation reconstructions
-                recon_ngcbct_agg_val = aggregate_saved_recons(ng_val_paths, augment=False, out=recon_ngcbct_agg_val)
-                logger.info(f"Aggregated validation data for epoch {epoch_ndx}: shape {recon_ngcbct_agg_val.shape}.")
+                recon_ngcbct_agg_val = aggregate_saved_recons(ng_val_paths, augment=False)
+                np.save(self.files.get_images_aggregate_filepath(input_type, "VALIDATION", gated=False), recon_ngcbct_agg_val.numpy())
+                logger.info(f"Aggregated and saved validation data for epoch {epoch_ndx}: shape {recon_ngcbct_agg_val.shape}.")
+                del recon_ngcbct_agg_val
 
                 # 5. Initialize the training dataloader using the file we just created
                 logger.info(f"Initializing training dataloaders for epoch {epoch_ndx}.")
-                train_dl = init_dataloader(self.config, self.files, "TRAIN", self.config["input_type"], self.config['domain'], tensor=recon_ngcbct_agg_train, recon_len=recon_ngcbct_agg_train.shape[0] / len(ng_train_paths))
-                val_dl = init_dataloader(self.config, self.files, "VALIDATION", self.config["input_type"], self.config['domain'], tensor=recon_ngcbct_agg_val, recon_len=recon_ngcbct_agg_val.shape[0] / len(ng_val_paths))
+                train_dl = init_dataloader(self.config, self.files, "TRAIN", self.config["input_type"], self.config['domain'], augment_on_fly=True, recon_len=160)
+                val_dl = init_dataloader(self.config, self.files, "VALIDATION", self.config["input_type"], self.config['domain'], augment_on_fly=True, recon_len=160)
 
             logger.debug(
                 f"Learning rate is {self.scheduler.get_last_lr()[0]} at epoch {epoch_ndx}."
@@ -492,7 +473,7 @@ class TrainingApp:
 
             if self.scans_agg_train is not None:
                 # Delete the dataloaders to free up memory
-                del train_dl.dataset.tensor_2, val_dl.dataset.tensor_2
+                del train_dl.dataset.tensor_1, val_dl.dataset.tensor_1, train_dl.dataset.tensor_2, val_dl.dataset.tensor_2
                 del train_dl.dataset, val_dl.dataset
                 del train_dl, val_dl
                 gc.collect()
@@ -571,6 +552,15 @@ class TrainingApp:
             del self.time_str
         except Exception as e:
             logger.error(f"Error during memory cleanup: {e}")
+
+        # Try to delete on-the-fly aggregated reconstructions
+        if self.scans_agg_train is not None:
+            try:
+                os.remove(self.files.get_images_aggregate_filepath(self.config["input_type"], "TRAIN", gated=False))
+                os.remove(self.files.get_images_aggregate_filepath(self.config["input_type"], "VALIDATION", gated=False))
+                logger.info("Aggregated reconstructions deleted successfully.")
+            except Exception as e:
+                logger.error(f"Error deleting aggregated reconstructions: {e}")
 
         with torch.no_grad():
             torch.cuda.empty_cache()

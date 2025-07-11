@@ -264,60 +264,36 @@ class PairSet(Dataset):
 
 
 class PairNumpySet(Dataset):
-    def __init__(self, tensor_path_1, tensor_path_2, device):
+    def __init__(self, tensor_path_1, tensor_path_2, device, augment_on_fly=False, recon_len=None):
         # Load only metadata (not full tensors)
         self.tensor_1 = np.load(tensor_path_1, mmap_mode="r")
         self.tensor_2 = np.load(tensor_path_2, mmap_mode="r")
-        if self.tensor_1.shape != self.tensor_2.shape:
-            raise ValueError("Tensors must have the same shape.")
-        self.length = self.tensor_1.shape[0]  # Number of samples
-        self.device = device
-
-    def __len__(self):
-        return self.length
-
-    def __getitem__(self, idx):
-        # Load only the required slice
-        img1 = torch.tensor(self.tensor_1[idx]).to(self.device)
-        img2 = torch.tensor(self.tensor_2[idx]).to(self.device)
-        return img1, img2  # Return as a paired sample
-
-class PairNumpySetRAM(Dataset):
-    def __init__(self, tensor_1, tensor_2_path, device, augment, recon_len):
-        # Load only metadata (not full tensors)
-        self.tensor_1 = tensor_1
-        self.tensor_2 = np.load(tensor_2_path, mmap_mode="r")
-        factor = 3 if augment else 1
+        factor = 3 if augment_on_fly else 1
         if self.tensor_1.shape[0] * factor != self.tensor_2.shape[0] or self.tensor_1.shape[1:] != self.tensor_2.shape[1:]:
             raise ValueError("Tensors must have the same shape.")
         self.length = self.tensor_2.shape[0]  # Number of samples
         self.device = device
-        self.augment = augment
-        self.recon_len = int(recon_len)
+        self.augment_on_fly = augment_on_fly
+        self.recon_len = recon_len
 
+        if self.augment_on_fly and recon_len is None:
+            raise ValueError("recon_len must be provided when augment_on_fly is True.")
 
     def __len__(self):
         return self.length
 
     def __getitem__(self, idx):
         # Load only the required slice
-        ################ RECALL DATA IS AGGREGATED LIKE THIS for tensor 2, so we need to simulate this for tensor 1
-        # if augment:
-        #     recon_agg[3 * i * recon.shape[0] : (3 * i + 1) * recon.shape[0], ...] = recon
-        #     recon_agg[(3 * i + 1) * recon.shape[0] : (3 * i + 2) * recon.shape[0], ...] = recon.flip(2)
-        #     recon_agg[(3 * i + 2) * recon.shape[0] : (3 * i + 3) * recon.shape[0], ...] = recon.flip(3)
-        ####################
-        # For tensor 1, we simulate augmentation based on the index (so then we don't have to store the augmented tensor in RAM)
-        if self.augment:
+        if self.augment_on_fly:
             slice_idx = idx % self.recon_len
             vol_num = idx // (3 * self.recon_len)
             if (idx // self.recon_len) % 3 == 0:
-                img1 = self.tensor_1[slice_idx + vol_num * self.recon_len].to(self.device)
+                img1 = torch.tensor(self.tensor_1[slice_idx + vol_num * self.recon_len]).to(self.device)
             elif (idx // self.recon_len) % 3 == 1:
-                img1 = self.tensor_1[slice_idx + vol_num * self.recon_len].flip(1).to(self.device)
+                img1 = torch.tensor(self.tensor_1[slice_idx + vol_num * self.recon_len]).flip(1).to(self.device)
             else:
-                img1 = self.tensor_1[slice_idx + vol_num * self.recon_len].flip(2).to(self.device)
+                img1 = torch.tensor(self.tensor_1[slice_idx + vol_num * self.recon_len]).flip(2).to(self.device)
         else:
-            img1 = self.tensor_1[idx].to(self.device)
+            img1 = torch.tensor(self.tensor_1[idx]).to(self.device)
         img2 = torch.tensor(self.tensor_2[idx]).to(self.device)
         return img1, img2  # Return as a paired sample

@@ -1081,14 +1081,22 @@ class SWAG(nn.Module):
     This implementation is a close adaptation of the official SWAG repository's code,
     modified for a post-hoc workflow where model checkpoints are loaded from disk.
     """
-    def __init__(self, base_model_cls, swag_checkpoint_paths, swag_cov_mat_rank, **kwargs):
+    def __init__(self, base_model_cls, swag_checkpoint_paths, swag_cov_mat_rank, frozen_params=None, **kwargs):
         super().__init__()
+        # Store the set of frozen parameter names for efficient lookup
+        self.frozen_params = set(frozen_params) if frozen_params is not None else set()
 
         self.params = []
         self.base_model_cls = base_model_cls
         self.base_model_kwargs = kwargs
         self.base_model = self.base_model_cls(**self.base_model_kwargs)
         
+        # Get the full names of parameters in the same order they will be processed.
+        # We create a temporary model to get named_parameters before they are replaced by buffers.
+        # The iteration order of named_parameters() and apply() is deterministic (pre-order).
+        temp_model_for_names = self.base_model_cls(**self.base_model_kwargs)
+        self.param_names = [name for name, _ in temp_model_for_names.named_parameters()]
+
         # This function traverses the model and sets up the buffers for SWAG statistics
         self.base_model.apply(lambda module: swag_parameters(module, self.params))
 
@@ -1105,17 +1113,37 @@ class SWAG(nn.Module):
         saved model checkpoints.
         """
         # Load all state dicts from the provided paths
-        state_dicts = [torch.load(path) for path in checkpoint_paths]
+        state_dicts = [torch.load(path)['state_dict'] for path in checkpoint_paths]
         
         num_models = 0
-        
+        frozen_param_initial_values = {}
+
         for i, state_dict in enumerate(tqdm(state_dicts, desc="Computing SWAG Statistics")):
             # Create a temporary base model instance and load the state dict
             temp_model = self.base_model_cls(**self.base_model_kwargs)
             temp_model.load_state_dict(state_dict)
 
-            # Use the same logic as the online 'collect_model' method
-            for (module, name), base_param in zip(self.params, temp_model.parameters()):
+            # We zip self.params, self.param_names, and the parameters from the loaded model
+            for param_idx, ((module, name), base_param) in enumerate(zip(self.params, temp_model.parameters())):
+                full_name = self.param_names[param_idx]
+
+                # Handle frozen parameters
+                if full_name in self.frozen_params:
+                    if i == 0:
+                        # On the first model, store the value and set the mean buffer to this constant value
+                        frozen_param_initial_values[full_name] = base_param.data.clone()
+                        module.__getattr__(f"{name}_mean").copy_(base_param.data)
+                    else:
+                        # On subsequent models, verify the value hasn't changed
+                        if not torch.equal(base_param.data, frozen_param_initial_values[full_name]):
+                            raise ValueError(
+                                f"Parameter '{full_name}' is marked as frozen, but its value "
+                                f"changed between checkpoints."
+                            )
+                    # Skip SWAG updates for this frozen parameter
+                    continue
+
+                # Use the same logic as the online 'collect_model' method for non-frozen params
                 mean = module.__getattr__(f"{name}_mean")
                 sq_mean = module.__getattr__(f"{name}_sq_mean")
 
@@ -1142,7 +1170,7 @@ class SWAG(nn.Module):
         # Store the final count of models used
         self.register_buffer("n_models", torch.tensor(num_models, dtype=torch.long))
 
-    def sample(self, scale=1.0,seed=None):
+    def sample(self, scale=1.0, seed=None):
         """
         Samples a new set of weights from the SWAG posterior and loads them
         into the base model for a forward pass. This is an adaptation of `sample_fullrank`.
@@ -1150,40 +1178,56 @@ class SWAG(nn.Module):
         if seed is not None:
             torch.manual_seed(seed)
 
-        # 1. Flatten all SWAG statistics into vectors
-        mean_list = [m.__getattr__(f"{n}_mean") for m, n in self.params]
-        sq_mean_list = [m.__getattr__(f"{n}_sq_mean") for m, n in self.params]
-        cov_mat_sqrt_list = [m.__getattr__(f"{n}_cov_mat_sqrt") for m, n in self.params]
+        # 1. Separate frozen and SWAG parameters
+        swag_params_info = []
+        frozen_params_info = []
+        for i, (module, name) in enumerate(self.params):
+            full_name = self.param_names[i]
+            if full_name in self.frozen_params:
+                frozen_params_info.append((module, name))
+            else:
+                swag_params_info.append((module, name))
 
-        mean_vec = flatten(mean_list)
-        sq_mean_vec = flatten(sq_mean_list)
-        
-        # 2. Draw sample from the diagonal part
-        var_vec = torch.clamp(sq_mean_vec - mean_vec**2, 1e-30)
-        diag_sample = torch.sqrt(var_vec) * torch.randn_like(var_vec)
+        # --- Sampling for SWAG parameters ---
+        if swag_params_info:
+            # 2. Flatten SWAG statistics for swaggable parameters
+            mean_list = [m.__getattr__(f"{n}_mean") for m, n in swag_params_info]
+            sq_mean_list = [m.__getattr__(f"{n}_sq_mean") for m, n in swag_params_info]
+            cov_mat_sqrt_list = [m.__getattr__(f"{n}_cov_mat_sqrt") for m, n in swag_params_info]
 
-        # 3. Draw sample from the low-rank part
-        # Concatenate column-wise for the low-rank matrix
-        cov_mat_sqrt = torch.cat(cov_mat_sqrt_list, dim=1) 
-        
-        z = torch.randn(cov_mat_sqrt.shape[0], device=cov_mat_sqrt.device)
-        low_rank_sample = (cov_mat_sqrt.t() @ z)
-        
-        num_models = self.n_models.item()
-        if num_models > 1:
-            low_rank_sample /= math.sqrt(num_models - 1)
-        
-        # 4. Combine samples
-        rand_sample = scale * (diag_sample + low_rank_sample) / math.sqrt(2.0)
-        w_sample = mean_vec + rand_sample
+            mean_vec = flatten(mean_list)
+            sq_mean_vec = flatten(sq_mean_list)
+            
+            # 3. Draw sample from the diagonal part
+            var_vec = torch.clamp(sq_mean_vec - mean_vec**2, 1e-30)
+            diag_sample = torch.sqrt(var_vec) * torch.randn_like(var_vec)
 
-        # 5. Load the sampled weights back into the model
-        # The unflatten_like function expects a batch dimension
-        w_sample = w_sample.unsqueeze(0)
-        samples_list = unflatten_like(w_sample, mean_list)
+            # 4. Draw sample from the low-rank part
+            cov_mat_sqrt = torch.cat(cov_mat_sqrt_list, dim=1) 
+            
+            z = torch.randn(cov_mat_sqrt.shape[0], device=cov_mat_sqrt.device)
+            low_rank_sample = (cov_mat_sqrt.t() @ z)
+            
+            num_models = self.n_models.item()
+            if num_models > 1:
+                low_rank_sample /= math.sqrt(num_models - 1)
+            
+            # 5. Combine samples
+            rand_sample = scale * (diag_sample + low_rank_sample) / math.sqrt(2.0)
+            w_sample = mean_vec + rand_sample
 
-        for (module, name), sample in zip(self.params, samples_list):
-            module.register_parameter(name, nn.Parameter(sample))
+            # 6. Load the sampled weights back into the model for SWAG params
+            w_sample = w_sample.unsqueeze(0)
+            samples_list = unflatten_like(w_sample, mean_list)
+
+            for (module, name), sample in zip(swag_params_info, samples_list):
+                module.register_parameter(name, nn.Parameter(sample))
+
+        # --- Loading for Frozen parameters ---
+        for module, name in frozen_params_info:
+            # For frozen layers, load their constant value, which is stored in the mean buffer
+            mean_value = module.__getattr__(f"{name}_mean")
+            module.register_parameter(name, nn.Parameter(mean_value))
 
 
 
@@ -1484,3 +1528,90 @@ class IResNetBBB(nn.Module):
                 # Here we just sum them up.
                 total_kl_term += module.get_kl_divergence_term()
         return total_kl_term
+
+
+class IResNetEvidential(nn.Module):
+
+    def __init__(self, img_ch=1):
+        super(IResNetEvidential, self).__init__()
+
+        up_conv = True
+
+        self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
+
+        self.conv1 = ConvBlock(ch_in=img_ch, ch_out=64)
+        self.conv1_extra = SingleConv(ch_in=64, ch_out=64)
+        self.conv2 = ConvBlock(ch_in=64, ch_out=128)
+        self.conv3 = ConvBlock(ch_in=128, ch_out=256)
+        self.conv4 = ConvBlock(ch_in=256, ch_out=512)
+        self.conv5 = ConvBlock(ch_in=512, ch_out=1024)
+
+        self.resnet = ResidualBlock_mod(ch_in=1024)
+        # self.resnet = ResidualBlock(ch_in=1024)
+
+        self.up5 = UpConvBlock(ch_in=1024, ch_out=512, up_conv=up_conv)
+        self.up_conv5 = ConvBlock(ch_in=1024, ch_out=512)
+        self.up4 = UpConvBlock(ch_in=512, ch_out=256, up_conv=up_conv)
+        self.up_conv4 = ConvBlock(ch_in=512, ch_out=256)
+        self.up3 = UpConvBlock(ch_in=256, ch_out=128, up_conv=up_conv)
+        self.up_conv3 = ConvBlock(ch_in=256, ch_out=128)
+        self.up2 = UpConvBlock(ch_in=128, ch_out=64, up_conv=up_conv)
+        self.up_conv2 = ConvBlock(ch_in=128, ch_out=64)
+
+        self.conv_1x1 = nn.Conv2d(64, 4, kernel_size=1, stride=1, padding=0)
+
+    def forward(self, input):
+        # encoding path
+        e1 = self.conv1(input)
+        e1 = self.conv1_extra(e1)
+
+        e2 = self.maxpool(e1)
+        e2 = self.conv2(e2)
+
+        e3 = self.maxpool(e2)
+        e3 = self.conv3(e3)
+
+        e4 = self.maxpool(e3)
+        e4 = self.conv4(e4)
+
+        e5 = self.maxpool(e4)
+        e5 = self.conv5(e5)
+
+        # ResNet Blocks
+        r1 = self.resnet(e5)
+        r2 = self.resnet(r1)
+        r3 = self.resnet(r2)
+        r4 = self.resnet(r3)
+        r5 = self.resnet(r4)
+        r6 = self.resnet(r5)
+        r7 = self.resnet(r6)
+
+        # decoding + concat path
+        d5 = self.up5(r7)
+        d5 = torch.cat((e4, d5), dim=1)
+        d5 = self.up_conv5(d5)
+
+        d4 = self.up4(d5)
+        d4 = torch.cat((e3, d4), dim=1)
+        d4 = self.up_conv4(d4)
+
+        d3 = self.up3(d4)
+        d3 = torch.cat((e2, d3), dim=1)
+        d3 = self.up_conv3(d3)
+
+        d2 = self.up2(d3)
+        d2 = torch.cat((e1, d2), dim=1)
+        d2 = self.up_conv2(d2)
+
+        d1 = self.conv_1x1(d2)
+
+        # additional skip connection between input and output channel 1
+        gamma = input + d1[:, 0:1, :, :]
+
+        # softplus the other channels to ensure positivity (and add 1 to alpha)
+        # and an additional small bit, in case there is underflow in softplus
+        nu = F.softplus(d1[:, 1:2, :, :]) + 1e-6
+        alpha = F.softplus(d1[:, 2:3, :, :]) + 1.0 + 1e-6
+        beta = F.softplus(d1[:, 3:4, :, :]) + 1e-6
+
+        return gamma, nu, alpha, beta

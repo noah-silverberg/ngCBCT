@@ -233,6 +233,44 @@ class TrainingApp:
         ):
             self._load_checkpoint(checkpoint_epoch, optimizer_state, network_state)
 
+        # 1. Define the layers you want to freeze during SWAG training.
+        # These are the names of the attributes in your IResNetDropout class definition.
+        layers_to_freeze = ['conv1', 'conv1_extra', 'up2', 'up_conv2', 'conv_1x1']
+
+        print("--- Configuring model parameters for SWAG ---")
+
+        # 2. Iterate through all named parameters to freeze the specified layers.
+        for name, param in self.model.named_parameters():
+            # Assume all layers are trainable at first
+            param.requires_grad = True
+            
+            # Freeze layers that start with the specified names
+            for layer_name in layers_to_freeze:
+                if name.startswith(layer_name):
+                    param.requires_grad = False
+                    break # Exit the inner loop once a match is found
+
+        # 3. Create a list of parameters that WILL be trained during SWAG.
+        # This is the list you must pass to your SWAG optimizer.
+        swag_params = [p for p in self.model.parameters() if p.requires_grad]
+
+        # 4. (Verification) Print a summary to confirm the setup.
+        print("Layers to be FROZEN (requires_grad=False):")
+        for name, param in self.model.named_parameters():
+            if not param.requires_grad:
+                print(f"  - {name}")
+
+        num_total_params = sum(p.numel() for p in self.model.parameters())
+        num_swag_params = sum(p.numel() for p in swag_params)
+        print(f"\nTotal parameters: {num_total_params:,}")
+        print(f"Parameters for SWAG training: {num_swag_params:,}")
+        print(f"Frozen parameters: {num_total_params - num_swag_params:,}")
+
+        # Modify the optimizer learning rate to 5e-4 for SWAG training (and 0 for the frozen layers)
+        logger.info("SWAG training enabled. Setting learning rate to 5e-4 for SWAG parameters.")
+        for param_group in self.optimizer.param_groups:
+            param_group['lr'] = 5e-4  # Set learning rate for SWAG parameters
+
     def _load_checkpoint(
         self, checkpoint_epoch: int, optimizer_state: dict, network_state: dict
     ):
@@ -284,7 +322,7 @@ class TrainingApp:
                 input_type = self.config['input_type']
 
                 # Map epoch number (1-50) to passthrough number (0-49)
-                passthrough_num = epoch_ndx - 1
+                passthrough_num = (epoch_ndx - 1) % 10 # TODO temp fix
 
                 # 1. Get the list of reconstruction file paths for the current passthrough
                 ng_train_paths = [self.files.get_recon_filepath(
@@ -305,14 +343,14 @@ class TrainingApp:
                             ) for patient, scan, st in self.scans_agg_val]
 
                 # 3. Aggregate and save the reconstructions from the file paths
-                recon_ngcbct_agg_train = aggregate_saved_recons(ng_train_paths, augment=False)
-                np.save(self.files.get_images_aggregate_filepath(input_type, "TRAIN", gated=False), recon_ngcbct_agg_train.numpy())
+                recon_ngcbct_agg_train = aggregate_saved_recons(ng_train_paths, augment=False).numpy()
+                np.save(self.files.get_images_aggregate_filepath(input_type, "TRAIN", gated=False), recon_ngcbct_agg_train)
                 logger.info(f"Aggregated and saved training data for epoch {epoch_ndx}: shape {recon_ngcbct_agg_train.shape}.")
                 del recon_ngcbct_agg_train
 
                 # 4. Aggregate and save the validation reconstructions
-                recon_ngcbct_agg_val = aggregate_saved_recons(ng_val_paths, augment=False)
-                np.save(self.files.get_images_aggregate_filepath(input_type, "VALIDATION", gated=False), recon_ngcbct_agg_val.numpy())
+                recon_ngcbct_agg_val = aggregate_saved_recons(ng_val_paths, augment=False).numpy()
+                np.save(self.files.get_images_aggregate_filepath(input_type, "VALIDATION", gated=False), recon_ngcbct_agg_val)
                 logger.info(f"Aggregated and saved validation data for epoch {epoch_ndx}: shape {recon_ngcbct_agg_val.shape}.")
                 del recon_ngcbct_agg_val
 
@@ -530,6 +568,15 @@ class TrainingApp:
         # Clean up memory
         logger.debug("Cleaning up memory...")
         gc.collect()
+        
+        # Try to delete on-the-fly aggregated reconstructions
+        if self.scans_agg_train is not None:
+            try:
+                os.remove(self.files.get_images_aggregate_filepath(self.config["input_type"], "TRAIN", gated=False))
+                os.remove(self.files.get_images_aggregate_filepath(self.config["input_type"], "VALIDATION", gated=False))
+                logger.info("Aggregated reconstructions deleted successfully.")
+            except Exception as e:
+                logger.error(f"Error deleting aggregated reconstructions: {e}")
 
         # We don't want to have the whole pipeline break if we fail to clean up memory
         # So we catch any exceptions that might occur during cleanup
@@ -552,15 +599,6 @@ class TrainingApp:
             del self.time_str
         except Exception as e:
             logger.error(f"Error during memory cleanup: {e}")
-
-        # Try to delete on-the-fly aggregated reconstructions
-        if self.scans_agg_train is not None:
-            try:
-                os.remove(self.files.get_images_aggregate_filepath(self.config["input_type"], "TRAIN", gated=False))
-                os.remove(self.files.get_images_aggregate_filepath(self.config["input_type"], "VALIDATION", gated=False))
-                logger.info("Aggregated reconstructions deleted successfully.")
-            except Exception as e:
-                logger.error(f"Error deleting aggregated reconstructions: {e}")
 
         with torch.no_grad():
             torch.cuda.empty_cache()

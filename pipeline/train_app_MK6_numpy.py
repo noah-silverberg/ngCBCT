@@ -305,14 +305,14 @@ class TrainingApp:
                             ) for patient, scan, st in self.scans_agg_val]
 
                 # 3. Aggregate and save the reconstructions from the file paths
-                recon_ngcbct_agg_train = aggregate_saved_recons(ng_train_paths, augment=False)
-                np.save(self.files.get_images_aggregate_filepath(input_type, "TRAIN", gated=False), recon_ngcbct_agg_train.numpy())
+                recon_ngcbct_agg_train = aggregate_saved_recons(ng_train_paths, augment=False).numpy()
+                np.save(self.files.get_images_aggregate_filepath(input_type, "TRAIN", gated=False), recon_ngcbct_agg_train)
                 logger.info(f"Aggregated and saved training data for epoch {epoch_ndx}: shape {recon_ngcbct_agg_train.shape}.")
                 del recon_ngcbct_agg_train
 
                 # 4. Aggregate and save the validation reconstructions
-                recon_ngcbct_agg_val = aggregate_saved_recons(ng_val_paths, augment=False)
-                np.save(self.files.get_images_aggregate_filepath(input_type, "VALIDATION", gated=False), recon_ngcbct_agg_val.numpy())
+                recon_ngcbct_agg_val = aggregate_saved_recons(ng_val_paths, augment=False).numpy()
+                np.save(self.files.get_images_aggregate_filepath(input_type, "VALIDATION", gated=False), recon_ngcbct_agg_val)
                 logger.info(f"Aggregated and saved validation data for epoch {epoch_ndx}: shape {recon_ngcbct_agg_val.shape}.")
                 del recon_ngcbct_agg_val
 
@@ -530,6 +530,15 @@ class TrainingApp:
         # Clean up memory
         logger.debug("Cleaning up memory...")
         gc.collect()
+        
+        # Try to delete on-the-fly aggregated reconstructions
+        if self.scans_agg_train is not None:
+            try:
+                os.remove(self.files.get_images_aggregate_filepath(self.config["input_type"], "TRAIN", gated=False))
+                os.remove(self.files.get_images_aggregate_filepath(self.config["input_type"], "VALIDATION", gated=False))
+                logger.info("Aggregated reconstructions deleted successfully.")
+            except Exception as e:
+                logger.error(f"Error deleting aggregated reconstructions: {e}")
 
         # We don't want to have the whole pipeline break if we fail to clean up memory
         # So we catch any exceptions that might occur during cleanup
@@ -552,15 +561,6 @@ class TrainingApp:
             del self.time_str
         except Exception as e:
             logger.error(f"Error during memory cleanup: {e}")
-
-        # Try to delete on-the-fly aggregated reconstructions
-        if self.scans_agg_train is not None:
-            try:
-                os.remove(self.files.get_images_aggregate_filepath(self.config["input_type"], "TRAIN", gated=False))
-                os.remove(self.files.get_images_aggregate_filepath(self.config["input_type"], "VALIDATION", gated=False))
-                logger.info("Aggregated reconstructions deleted successfully.")
-            except Exception as e:
-                logger.error(f"Error deleting aggregated reconstructions: {e}")
 
         with torch.no_grad():
             torch.cuda.empty_cache()

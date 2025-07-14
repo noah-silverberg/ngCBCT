@@ -321,14 +321,14 @@ class TrainingApp:
                             ) for patient, scan, st in self.scans_agg_val]
 
                 # 3. Aggregate and save the reconstructions from the file paths
-                recon_ngcbct_agg_train = aggregate_saved_recons(ng_train_paths, augment=False).numpy()
-                np.save(self.files.get_images_aggregate_filepath(input_type, "TRAIN", gated=False), recon_ngcbct_agg_train)
+                recon_ngcbct_agg_train = aggregate_saved_recons(ng_train_paths, augment=False)
+                np.save(self.files.get_images_aggregate_filepath(input_type, "TRAIN", gated=False), recon_ngcbct_agg_train.numpy())
                 logger.info(f"Aggregated and saved training data for epoch {epoch_ndx}: shape {recon_ngcbct_agg_train.shape}.")
                 del recon_ngcbct_agg_train
 
                 # 4. Aggregate and save the validation reconstructions
-                recon_ngcbct_agg_val = aggregate_saved_recons(ng_val_paths, augment=False).numpy()
-                np.save(self.files.get_images_aggregate_filepath(input_type, "VALIDATION", gated=False), recon_ngcbct_agg_val)
+                recon_ngcbct_agg_val = aggregate_saved_recons(ng_val_paths, augment=False)
+                np.save(self.files.get_images_aggregate_filepath(input_type, "VALIDATION", gated=False), recon_ngcbct_agg_val.numpy())
                 logger.info(f"Aggregated and saved validation data for epoch {epoch_ndx}: shape {recon_ngcbct_agg_val.shape}.")
                 del recon_ngcbct_agg_val
 

@@ -5,8 +5,13 @@ from scipy.io import loadmat
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-from skimage.metrics import structural_similarity as ssim
+import torchmetrics.image
 import pandas as pd
+
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1" 
+DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {DEVICE} named '{torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}'")
 
 # -----------------------------------------------------------------------------
 # CONFIG
@@ -24,43 +29,77 @@ SCAN_TYPES = ["HF"]
 # -----------------------------------------------------------------------------
 # UTILS: metrics
 # -----------------------------------------------------------------------------
-def psnr_per_slice(gt, rec, mask):
-    mse = np.mean((gt - rec) ** 2, axis=(0, 1), where=mask[..., None])
-    psnr = 20 * np.log10(np.max(gt * mask[..., None], axis=(0, 1))) - 10 * np.log10(mse)
-    psnr[np.isinf(psnr)] = np.nan
-    return psnr
+def psnr_per_slice(gt, rec, mask, device):
+    gt, rec, mask = gt.to(device), rec.to(device), mask.to(device)
+    num_slices = gt.shape[2]
+    psnrs = []
+    
+    # Init PSNR metric
+    psnr_metric = torchmetrics.image.PeakSignalNoiseRatio(data_range=1.0, reduction='none').to(device)
+
+    for i in range(num_slices):
+        # Add batch and channel dims for torchmetrics
+        gt_slice = gt[:, :, i].unsqueeze(0).unsqueeze(0)
+        rec_slice = rec[:, :, i].unsqueeze(0).unsqueeze(0)
+        
+        # Apply mask
+        gt_slice = gt_slice * mask.unsqueeze(0).unsqueeze(0)
+        rec_slice = rec_slice * mask.unsqueeze(0).unsqueeze(0)
+
+        val = psnr_metric(rec_slice, gt_slice)
+        psnrs.append(val.item())
+        
+    psnrs_np = np.array(psnrs)
+    psnrs_np[np.isinf(psnrs_np)] = np.nan
+    return psnrs_np
 
 
-def mssim_per_slice(gt, rec, mask):
-    vals = []
-    for i in range(gt.shape[2]):
-        _, mp = ssim(
-            gt[:, :, i], rec[:, :, i], full=True, data_range=1.0, **SSIM_KWARGS
-        )
-        vals.append(mp[mask])
-    return np.array([v.mean() for v in vals])
+def mssim_per_slice(gt, rec, mask, device):
+    gt, rec, mask = gt.to(device), rec.to(device), mask.to(device)
+    num_slices = gt.shape[2]
+    ssims = []
+    
+    # Init SSIM metric
+    ssim_metric = torchmetrics.image.StructuralSimilarityIndexMeasure(data_range=1.0, **SSIM_KWARGS).to(device)
+
+    for i in range(num_slices):
+        # Add batch and channel dims for torchmetrics
+        gt_slice = gt[:, :, i].unsqueeze(0).unsqueeze(0)
+        rec_slice = rec[:, :, i].unsqueeze(0).unsqueeze(0)
+        
+        # Apply mask
+        gt_slice = gt_slice * mask.unsqueeze(0).unsqueeze(0)
+        rec_slice = rec_slice * mask.unsqueeze(0).unsqueeze(0)
+        
+        ssims.append(ssim_metric(rec_slice, gt_slice).item())
+        
+    return np.array(ssims)
 
 
 # -----------------------------------------------------------------------------
 # PLOTTING
 # -----------------------------------------------------------------------------
 def save_ssim_map(
-    gt, rec_list, titles, mask, tumor_slice, tumor_xy, outpath, scan_type
+    gt, rec_list, titles, mask, tumor_slice, tumor_xy, outpath, scan_type, device
 ):
     n = len(rec_list) + 1
-    # two rows: top = actual scans, bottom = SSIM maps
+    # two rows: top = actual scans, bottom = empty for SSIM value text
     fig, axes = plt.subplots(2, n, figsize=(3 * n, 6))
     # determine arrow offset based on scan type
     arrow_offset = 40 if scan_type == "HF" else 20
+    
+    # init ssim metric
+    ssim_metric = torchmetrics.image.StructuralSimilarityIndexMeasure(data_range=1.0, **SSIM_KWARGS).to(device)
+
     # top row: GT and reconstructions
     for i in range(n):
         ax = axes[0, i]
         if i == 0:
-            ax.imshow(gt[..., tumor_slice] * mask, cmap="gray", vmin=0, vmax=1)
+            ax.imshow(gt[..., tumor_slice].cpu().numpy() * mask.cpu().numpy(), cmap="gray", vmin=0, vmax=1)
             ax.set_title("GT")
         else:
             ax.imshow(
-                rec_list[i - 1][..., tumor_slice] * mask, cmap="gray", vmin=0, vmax=1
+                rec_list[i - 1][..., tumor_slice].cpu().numpy() * mask.cpu().numpy(), cmap="gray", vmin=0, vmax=1
             )
             ax.set_title(titles[i - 1])
 
@@ -72,39 +111,25 @@ def save_ssim_map(
             arrowprops=dict(color="red", arrowstyle="->", lw=1.5),
         )
         ax.axis("off")
-    # bottom row: SSIM maps with arrow
+    
+    # bottom row: SSIM values
     for i in range(n):
         ax = axes[1, i]
-        if i == 0:
-            ax.axis("off")
-        else:
-            _, smap = ssim(
-                gt[..., tumor_slice],
-                rec_list[i - 1][..., tumor_slice],
-                full=True,
-                data_range=1.0,
-                **SSIM_KWARGS,
-            )
-            im = ax.imshow(smap * mask, cmap="viridis", vmin=0, vmax=1)
-            # arrow pointing to tumor
-            ax.annotate(
-                "",
-                xy=tumor_xy,
-                xytext=(tumor_xy[0] + arrow_offset, tumor_xy[1] + arrow_offset),
-                arrowprops=dict(color="red", arrowstyle="->", lw=1.5),
-            )
-            ax.set_title(f"SSIM {titles[i-1]}")
-            ax.axis("off")
-    # make room for colorbar
-    fig.subplots_adjust(right=0.85)
-    fig.colorbar(im, ax=axes[1, 1:].tolist(), fraction=0.02, pad=0.02, location="right")
+        ax.axis("off")
+        if i > 0:
+            gt_slice = gt[..., tumor_slice].unsqueeze(0).unsqueeze(0)
+            rec_slice = rec_list[i-1][..., tumor_slice].unsqueeze(0).unsqueeze(0)
+            
+            val = ssim_metric(rec_slice, gt_slice)
+            ax.text(0.5, 0.5, f"SSIM: {val.item():.4f}", ha='center', va='center', fontsize=12)
+
     fig.savefig(outpath, dpi=200)
     plt.close(fig)
 
 
-def save_psnr_mssim_plot(gt, dd, mask, outpath):
-    psnr_ddcnn = psnr_per_slice(gt, dd, mask)
-    mssim_ddcnn = mssim_per_slice(gt, dd, mask)
+def save_psnr_mssim_plot(gt, dd, mask, outpath, device):
+    psnr_ddcnn = psnr_per_slice(gt, dd, mask, device)
+    mssim_ddcnn = mssim_per_slice(gt, dd, mask, device)
     N = gt.shape[2]
 
     fig, ax = plt.subplots(2, 2, figsize=(10, 8))
@@ -261,6 +286,10 @@ def main():
                 arr *= 25.
             # leave dd_v unchanged
 
+            gt_t = torch.from_numpy(gt).float().to(DEVICE)
+            dd_v_t = torch.from_numpy(dd_v).float().to(DEVICE)
+            mask_t = torch.from_numpy(mask).to(DEVICE)
+
             # make output subdir
             odir = os.path.join(OUTPUT_DIR, f"{'HF'}_p{pid}_{sid}_{view}")
             os.makedirs(odir, exist_ok=True)
@@ -275,6 +304,7 @@ def main():
                 (t[1], t[0]),
                 os.path.join(odir, "SSIM_map.png"),
                 'HF',
+                DEVICE,
             )
 
             # 2) PSNR/MSSIM curves
@@ -283,6 +313,7 @@ def main():
                 dd_v,
                 mask,
                 os.path.join(odir, "PSNR_MSSIM.png"),
+                DEVICE,
             )
 
             # 3) summary metrics
@@ -292,8 +323,8 @@ def main():
                 ["DDCNN"],
                 [dd_v],
             ):
-                ps = psnr_per_slice(gt, arr, mask)
-                ms = mssim_per_slice(gt, arr, mask)
+                ps = psnr_per_slice(gt, arr, mask, DEVICE)
+                ms = mssim_per_slice(gt, arr, mask, DEVICE)
                 ps_all[name] = np.nanmean(ps)
                 ms_all[name] = np.nanmean(ms)
 

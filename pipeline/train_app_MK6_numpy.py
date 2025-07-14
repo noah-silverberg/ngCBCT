@@ -44,16 +44,31 @@ def init_model(config: dict):
 
     return model
 
+def nig_nll(gamma, nu, alpha, beta, y_true):
+    omega = 2.0 * beta * (1.0 + nu)
+    term1 = 0.5 * torch.log(torch.pi / nu)
+    term2 = -alpha * torch.log(omega)
+    term3 = (alpha + 0.5) * torch.log((y_true - gamma) ** 2 * nu + omega)
+    term4 = torch.special.gammaln(alpha) - torch.special.gammaln(alpha + 0.5)
 
-def init_loss(config: dict, is_bayesian: bool):
+    return term1 + term2 + term3 + term4
+
+def nig_reg(gamma, nu, alpha, beta, y_true):
+    return torch.abs(y_true - gamma) * (2.0 * nu + alpha)
+
+def init_loss(config: dict, is_bayesian: bool, is_evidential: bool = False):
     """
     Initializes the loss function. For BBB, we use SmoothL1Loss with 'sum' reduction.
     This calculates the Negative Log-Likelihood (NLL) term for the entire minibatch,
     which is consistent with how the total KL divergence for the model is calculated.
     """
+    if is_bayesian and is_evidential:
+        raise ValueError("Both Bayesian and Evidential settings cannot be enabled at the same time.")
     if is_bayesian:
         # Use 'sum' to get the total NLL for the batch.
         loss = nn.SmoothL1Loss(reduction='sum')
+    elif is_evidential:
+        loss = nn.SmoothL1Loss(reduction='mean')
     else:
         # 'mean' is standard for deterministic models.
         loss = nn.SmoothL1Loss(reduction='mean')
@@ -183,6 +198,7 @@ class TrainingApp:
         self.config["domain"] = domain
         self.files = files
         self.is_bayesian = self.config["is_bayesian"]
+        self.is_evidential = self.config["is_evidential"]
 
         # Store the list of scans needed for on-the-fly aggregation
         if scans_agg is None:
@@ -221,7 +237,7 @@ class TrainingApp:
 
         # Initialize model, loss, and optimizer
         self.model = init_model(self.config)
-        self.criterion = init_loss(self.config, self.is_bayesian)
+        self.criterion = init_loss(self.config, self.is_bayesian, self.is_evidential)
         self.optimizer, self.scheduler = init_optimizer(self.config, self.model)
         self.start_epoch = 1
 
@@ -373,6 +389,18 @@ class TrainingApp:
                         num_pixels = train_outputs.numel()
                         mean_recon_loss = reconstruction_loss.item() / num_pixels
                         logger.debug(f"Epoch {epoch_ndx}, Batch {batch_idx}: Mean Reconstruction Loss: {mean_recon_loss:.6f}")
+                elif self.is_evidential:
+                    # --- Evidential Loss Calculation ---
+                    # The loss is NLL + beta1 * reg + beta2 * SmoothL1Loss
+                    gamma, nu, alpha, beta = train_outputs
+                    nll = nig_nll(gamma, nu, alpha, beta, train_truths).mean()
+                    reg = nig_reg(gamma, nu, alpha, beta, train_truths).mean()
+                    evidential = nll + self.config['beta_evidential_reg'] * reg
+                    smooth_l1 = self.criterion(gamma, train_truths)
+                    train_loss = evidential + self.config['beta_evidential_smooth_l1'] * smooth_l1
+
+                    if batch_idx % 50 == 0:
+                        logger.debug(f"Epoch {epoch_ndx}, Batch {batch_idx}: Evidential Loss: {evidential.item():.4f}, NLL: {nll.item():.4f}, Reg: {reg.item():.4f}, SmoothL1Loss: {smooth_l1.item():.4f}")
                 else:
                     # Standard loss for a deterministic model
                     train_loss = self.criterion(train_outputs, train_truths)
@@ -447,6 +475,16 @@ class TrainingApp:
                         kl_term = self.model.kl_divergence()
                         kl_loss = kl_term / num_val_batches # Scale by number of validation batches
                         val_loss = reconstruction_loss + self.config['beta_BBB'] * kl_loss
+                    elif self.is_evidential:
+                        gamma, nu, alpha, beta = val_outputs
+                        nll = nig_nll(gamma, nu, alpha, beta, val_truths).mean()
+                        reg = nig_reg(gamma, nu, alpha, beta, val_truths).mean()
+                        evidential = nll + self.config['beta_evidential_reg'] * reg
+                        smooth_l1 = self.criterion(gamma, val_truths)
+                        val_loss = evidential + self.config['beta_evidential_smooth_l1'] * smooth_l1
+
+                        if val_batch_idx % 50 == 0:
+                            logger.debug(f"Epoch {epoch_ndx}, Batch {val_batch_idx}: Evidential Loss: {evidential.item():.4f}, NLL: {nll.item():.4f}, Reg: {reg.item():.4f}, SmoothL1Loss: {smooth_l1.item():.4f}")
                     else:
                         val_loss = self.criterion(val_outputs, val_truths)
                     

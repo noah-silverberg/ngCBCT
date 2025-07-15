@@ -56,6 +56,10 @@ def nig_nll(gamma, nu, alpha, beta, y_true):
 def nig_reg(gamma, nu, alpha, beta, y_true):
     return torch.abs(y_true - gamma) * (2.0 * nu + alpha)
 
+def nig_u_reg(gamma, nu, alpha, beta, y_true):
+    # From Ye et al. "Uncertainty Regularized Evidential Regression"
+    return -torch.abs(y_true - gamma) * torch.log(torch.exp(alpha - 1) - 1)
+
 def init_loss(config: dict, is_bayesian: bool, is_evidential: bool = False):
     """
     Initializes the loss function. For BBB, we use SmoothL1Loss with 'sum' reduction.
@@ -393,12 +397,13 @@ class TrainingApp:
                     gamma, nu, alpha, beta = train_outputs
                     nll = nig_nll(gamma, nu, alpha, beta, train_truths).mean()
                     reg = nig_reg(gamma, nu, alpha, beta, train_truths).mean()
-                    evidential = nll + self.config['beta_evidential_reg'] * reg
+                    u_reg = nig_u_reg(gamma, nu, alpha, beta, train_truths).mean()
+                    evidential = nll + self.config['beta_evidential_reg'] * reg + self.config['beta_evidential_u_reg'] * u_reg
                     smooth_l1 = self.criterion(gamma, train_truths)
                     train_loss = evidential + self.config['beta_evidential_smooth_l1'] * smooth_l1
 
                     if batch_idx % 50 == 0:
-                        logger.debug(f"Epoch {epoch_ndx}, Batch {batch_idx}: Evidential Loss: {evidential.item():.4f}, NLL: {nll.item():.4f}, Reg: {reg.item():.4f}, SmoothL1Loss: {smooth_l1.item():.4f}")
+                        logger.debug(f"Epoch {epoch_ndx}, Batch {batch_idx}: NLL: {nll.item():.4f}, Reg: {reg.item():.4f}, UReg: {u_reg.item():.4f}, SmoothL1Loss: {smooth_l1.item():.4f}")
                 else:
                     # Standard loss for a deterministic model
                     train_loss = self.criterion(train_outputs, train_truths)
@@ -477,12 +482,13 @@ class TrainingApp:
                         gamma, nu, alpha, beta = val_outputs
                         nll = nig_nll(gamma, nu, alpha, beta, val_truths).mean()
                         reg = nig_reg(gamma, nu, alpha, beta, val_truths).mean()
-                        evidential = nll + self.config['beta_evidential_reg'] * reg
+                        u_reg = nig_u_reg(gamma, nu, alpha, beta, val_truths).mean()
+                        evidential = nll + self.config['beta_evidential_reg'] * reg + self.config['beta_evidential_u_reg'] * u_reg
                         smooth_l1 = self.criterion(gamma, val_truths)
                         val_loss = evidential + self.config['beta_evidential_smooth_l1'] * smooth_l1
 
                         if val_batch_idx % 50 == 0:
-                            logger.debug(f"Epoch {epoch_ndx}, Batch {val_batch_idx}: Evidential Loss: {evidential.item():.4f}, NLL: {nll.item():.4f}, Reg: {reg.item():.4f}, SmoothL1Loss: {smooth_l1.item():.4f}")
+                            logger.debug(f"Epoch {epoch_ndx}, Batch {val_batch_idx}: NLL: {nll.item():.4f}, Reg: {reg.item():.4f}, UReg: {u_reg.item():.4f}, SmoothL1Loss: {smooth_l1.item():.4f}")
                     else:
                         val_loss = self.criterion(val_outputs, val_truths)
                     

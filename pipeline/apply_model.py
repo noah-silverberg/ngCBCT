@@ -144,7 +144,10 @@ def apply_model_to_recons(
     train_at_inference: bool = False, # for MC dropout
     _batch_size: int = 8, # Number of slices to process at once
 ):
-    """Apply CNN model slice-wise to nonstop-gated reconstructions to clean up image domain artifacts."""
+    """
+    Apply CNN model slice-wise to nonstop-gated reconstructions.
+    Handles both standard (single-tensor output) and evidential (four-tensor output) models.
+    """
     # Load the nonstop-gated reconstruction
     # NOTE: These each have shape (160, 512, 512) for HF and shape (160, 256, 256) for FF
     recon = torch.load(pt_path).detach().to(device)
@@ -159,12 +162,40 @@ def apply_model_to_recons(
         # Set the model to eval mode for inference
         model.eval()
 
+    # Determine output type by running one sample
+    with torch.no_grad():
+        sample_output = model(recon[0:1])
+    
+    is_evidential = isinstance(sample_output, (list, tuple)) and len(sample_output) == 4
+
+    if is_evidential:
+        logger.debug("Evidential model detected. Preparing for 4-channel output.")
+        # Initialize output tensors for evidential regression
+        gamma_out = torch.zeros_like(recon)
+        nu_out = torch.zeros_like(recon)
+        alpha_out = torch.zeros_like(recon)
+        beta_out = torch.zeros_like(recon)
+    else:
+        # For standard models, we can modify the input tensor in place
+        pass
+
     # Loop over the outputted slices in batches of _batch_size
     for i in range(0, recon.shape[0], _batch_size):
         # Adjust the batch size for the last batch to avoid going out of bounds
         batch_size = min(_batch_size, recon.shape[0] - i)
         indices = [i + j for j in range(batch_size)]
         with torch.no_grad():
-            recon[indices] = model(recon[indices]) # replace the slices in place
+            output = model(recon[indices])
+            if is_evidential:
+                gamma, nu, alpha, beta = output
+                gamma_out[indices] = gamma
+                nu_out[indices] = nu
+                alpha_out[indices] = alpha
+                beta_out[indices] = beta
+            else:
+                recon[indices] = output # replace the slices in place
 
-    return recon
+    if is_evidential:
+        return gamma_out, nu_out, alpha_out, beta_out
+    else:
+        return recon

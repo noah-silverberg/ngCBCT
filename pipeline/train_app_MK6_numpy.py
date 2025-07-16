@@ -57,8 +57,8 @@ def nig_reg(gamma, nu, alpha, beta, y_true):
     return torch.abs(y_true - gamma) * (2.0 * nu + alpha)
 
 def nig_u_reg(gamma, nu, alpha, beta, y_true):
-    # From Ye et al. "Uncertainty Regularized Evidential Regression"
-    return -torch.abs(y_true - gamma) * torch.log(torch.exp(alpha - 1) - 1)
+    # From Wu et al. "The Evidence Contraction Issue in Deep Evidential Regression: Discussion and Solution"
+    return (y_true - gamma) ** 2 * nu * (alpha - 1) / (beta * (nu + 1))
 
 def init_loss(config: dict, is_bayesian: bool, is_evidential: bool = False):
     """
@@ -401,9 +401,10 @@ class TrainingApp:
                     evidential = nll + self.config['beta_evidential_reg'] * reg + self.config['beta_evidential_u_reg'] * u_reg
                     smooth_l1 = self.criterion(gamma, train_truths)
                     train_loss = evidential + self.config['beta_evidential_smooth_l1'] * smooth_l1
+                    avg_evidence = torch.mean(2 * nu + alpha).item()
 
                     if batch_idx % 50 == 0:
-                        logger.debug(f"Epoch {epoch_ndx}, Batch {batch_idx}: NLL: {nll.item():.4f}, Reg: {reg.item():.4f}, UReg: {u_reg.item():.4f}, SmoothL1Loss: {smooth_l1.item():.4f}")
+                        logger.debug(f"Epoch {epoch_ndx}, Batch {batch_idx}: NLL: {nll.item():.4f}, Reg: {reg.item():.4f}, UReg: {u_reg.item():.4f}, SmoothL1Loss: {smooth_l1.item():.4f}, Avg Evidence: {avg_evidence:.4f}")
                 else:
                     # Standard loss for a deterministic model
                     train_loss = self.criterion(train_outputs, train_truths)

@@ -34,6 +34,129 @@ else:
         "CUDA is not available. Please check your PyTorch installation or GPU setup. Proceeding with CPU...this will be slow."
     )
 
+import matplotlib.pyplot as plt
+import numpy as np
+
+def generate_diagnostic_plots(model_version, epoch_ndx, batch_idx, model, loss_components, nig_params, train_truths):
+    """
+    Generates and displays a set of diagnostic plots for debugging evidential regression.
+    Adds counts of points in the "danger zone" to plot titles.
+    """
+    # Unpack loss components and NIG parameters
+    nll, reg, wu_reg, ye_reg, smooth_l1 = loss_components
+    gamma, nu, alpha, beta = nig_params
+
+    # Move all tensors to CPU and detach from the graph for plotting
+    gamma_np = gamma.detach().cpu().numpy().flatten()
+    nu_np = nu.detach().cpu().numpy().flatten()
+    alpha_np = alpha.detach().cpu().numpy().flatten()
+    beta_np = beta.detach().cpu().numpy().flatten()
+    truths_np = train_truths.detach().cpu().numpy().flatten()
+
+    # Danger zone counts
+    alpha_danger = np.sum(alpha_np <= 1.0)
+    nu_danger = np.sum(nu_np <= 0.0)
+    beta_danger = np.sum(beta_np <= 0.0)
+    ye_reg_arg = np.exp(alpha_np - 1) - 1
+    ye_reg_danger = np.sum(ye_reg_arg <= 0.0)
+    omega_np = (2.0 * beta_np * (1.0 + nu_np))
+    omega_danger = np.sum(omega_np <= 0.0)
+
+    # Create a 3x3 grid for plots
+    fig, axs = plt.subplots(3, 3, figsize=(18, 15))
+    fig.suptitle(f'Diagnostics for Epoch {epoch_ndx}, Batch {batch_idx}', fontsize=16)
+
+    # --- Plot 1: Loss Component Magnitudes ---
+    loss_names = ['NLL', 'Reg', 'Wu-Reg', 'Ye-Reg', 'SmoothL1']
+    losses = [nll.item(), reg.item(), wu_reg.item(), ye_reg.item(), smooth_l1.item()]
+    axs[0, 0].bar(loss_names, losses, color='skyblue')
+    axs[0, 0].set_title('1. Loss Component Magnitudes')
+    axs[0, 0].set_ylabel('Loss Value')
+    axs[0, 0].set_yscale('symlog') # Use symlog to handle potentially large differences
+
+    # --- Plot 2: Alpha ---
+    axs[0, 1].hist(alpha_np, bins=50, color='coral')
+    axs[0, 1].axvline(1.0, color='r', linestyle='--', label='α=1 (Unstable Boundary)')
+    axs[0, 1].set_title(f'2. Alpha (α) Distribution\n(Min: {alpha_np.min():.5f}, Mean: {alpha_np.mean():.5f})\nDanger zone (α≤1): {alpha_danger}')
+    axs[0, 1].set_xlabel('Value')
+    axs[0, 1].legend()
+    axs[0, 1].set_xscale('log')
+    axs[0, 1].set_yscale('log')
+
+    # --- Plot 3: Nu ---
+    axs[0, 2].hist(nu_np, bins=50, color='mediumseagreen')
+    axs[0, 2].axvline(0.0, color='r', linestyle='--', label='ν=0 (Unstable Boundary)')
+    axs[0, 2].set_title(f'3. Nu (ν) Distribution\n(Min: {nu_np.min():.5f}, Mean: {nu_np.mean():.5f})\nDanger zone (ν≤0): {nu_danger}')
+    axs[0, 2].set_xlabel('Value')
+    axs[0, 2].legend()
+    axs[0, 2].set_xscale('log')
+    axs[0, 2].set_yscale('log')
+
+    # --- Plot 4: Beta ---
+    axs[1, 0].hist(beta_np, bins=50, color='plum')
+    axs[1, 0].axvline(0.0, color='r', linestyle='--', label='β=0 (Unstable Boundary)')
+    axs[1, 0].set_title(f'4. Beta (β) Distribution\n(Min: {beta_np.min():.5f}, Mean: {beta_np.mean():.5f})\nDanger zone (β≤0): {beta_danger}')
+    axs[1, 0].set_xlabel('Value')
+    axs[1, 0].legend()
+    axs[1, 0].set_xscale('log')
+    axs[1, 0].set_yscale('log')
+
+    # --- Plot 5: Critical Argument in Ye Regularizer ---
+    axs[1, 1].hist(ye_reg_arg, bins=50, color='gold')
+    axs[1, 1].axvline(0.0, color='r', linestyle='--', label='Unstable Boundary (<=0)')
+    axs[1, 1].set_title(f'5. Input to log() in Ye Reg\n(Min: {ye_reg_arg.min():.5f})\nDanger zone (≤0): {ye_reg_danger}')
+    axs[1, 1].set_xlabel('exp(α - 1) - 1')
+    axs[1, 1].legend()
+    axs[1, 1].set_xscale('log')
+    axs[1, 1].set_yscale('log')
+
+    # --- Plot 6: Scatter Plot of Error vs. Variance ---
+    variance_np = (beta_np / (alpha_np - 1.0 + 1e-6)) * (1.0 + 1.0 / (nu_np + 1e-6))
+    error_np = np.abs(gamma_np - truths_np)
+    axs[1, 2].scatter(error_np, variance_np, alpha=0.3)
+    axs[1, 2].set_title('6. L1 Error vs. Variance')
+    axs[1, 2].set_xlabel('Absolute Error |γ - y|')
+    axs[1, 2].set_ylabel('Variance (β / (α-1))')
+    axs[1, 2].set_xscale('log')
+    axs[1, 2].set_yscale('log')
+    
+    # --- Plot 7: Histogram of Gradient Norms ---
+    grad_norms = [p.grad.norm().item() for p in model.parameters() if p.grad is not None]
+    axs[2, 0].hist(grad_norms, bins=50, color='c')
+    axs[2, 0].set_title('7. Gradient L2 Norms per Layer')
+    axs[2, 0].set_xlabel('Gradient Norm')
+    axs[2, 0].set_xscale('log')
+    axs[2, 0].set_yscale('log')
+
+    # --- Plot 8: Histogram of Prediction (gamma) ---
+    axs[2, 1].hist(gamma_np, bins=50, color='lightcoral')
+    axs[2, 1].set_title(f'8. Prediction (γ) Distribution')
+    axs[2, 1].set_xlabel('Value')
+    axs[2, 1].set_yscale('log')
+
+    # --- Plot 9: Histogram of Omega from NLL ---
+    axs[2, 2].hist(omega_np, bins=50, color='orange')
+    axs[2, 2].axvline(0.0, color='r', linestyle='--', label='Unstable Boundary (<=0)')
+    axs[2, 2].set_title(f'9. Input to log(ω) in NLL\n(Min: {omega_np.min():.5f})\nDanger zone (≤0): {omega_danger}')
+    axs[2, 2].set_xlabel('Omega (ω)')
+    axs[2, 2].legend()
+    axs[2, 2].set_xscale('log')
+    axs[2, 2].set_yscale('log')
+
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    # Save the figure to a file
+    ensure_dir(os.path.join("diagnostics", model_version))
+    fig_path =  os.path.join(
+            "diagnostics", model_version, f"epoch_{epoch_ndx}_batch_{batch_idx}_diagnostics.png"
+        )
+    fig.savefig(
+       fig_path,
+        dpi=300,
+        bbox_inches='tight'
+    )
+    logger.info(f"Diagnostic plots saved to {fig_path}")
+    # Close the figure to free memory
+    plt.close(fig)
 
 def init_model(config: dict):
     """Initialize the CNN model and move it to the GPU."""
@@ -407,16 +530,19 @@ class TrainingApp:
                     smooth_l1 = self.criterion(gamma, train_truths)
                     train_loss = evidential + self.config['beta_evidential_smooth_l1'] * smooth_l1
                     avg_evidence = torch.mean(2 * nu + alpha).item()
-
-                    if batch_idx % 200 == 0:
-                        logger.debug(f"Epoch {epoch_ndx}, Batch {batch_idx}: NLL: {nll.item():.4f}, Reg: {reg.item():.4f}, Wu Reg: {wu_reg.item():.4f}, Ye Reg: {ye_reg.item():.4f}, SmoothL1Loss: {smooth_l1.item():.4f}, Avg Evidence: {avg_evidence:.4f}")
                 else:
                     # Standard loss for a deterministic model
                     train_loss = self.criterion(train_outputs, train_truths)
 
                 train_loss.backward()
 
-                if batch_idx % 25 == 0:
+                if batch_idx % 250 == 0 and self.is_evidential:
+                    logger.debug(f"Epoch {epoch_ndx}, Batch {batch_idx}: NLL: {nll.item():.4f}, Reg: {reg.item():.4f}, Wu Reg: {wu_reg.item():.4f}, Ye Reg: {ye_reg.item():.4f}, SmoothL1Loss: {smooth_l1.item():.4f}, Avg Evidence: {avg_evidence:.4f}")
+                    
+                    loss_components = (nll, reg, wu_reg, ye_reg, smooth_l1)
+                    nig_params = (gamma, nu, alpha, beta)
+                    generate_diagnostic_plots(self.config['model_version'], epoch_ndx, batch_idx, self.model, loss_components, nig_params, train_truths)
+
                     # Always use the 80th slice (index 79) from the unshuffled training dataset
                     dataset = train_dl.dataset
                     slice_input, slice_truth = dataset[79]

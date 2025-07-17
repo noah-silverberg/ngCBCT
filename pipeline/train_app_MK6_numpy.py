@@ -143,25 +143,39 @@ def generate_diagnostic_plots(model_version, epoch_ndx, batch_idx, model, loss_c
     axs[2, 2].set_xscale('log')
     axs[2, 2].set_yscale('log')
 
+    # Sample up to 10,000 random points for faster plotting
+    n_total = alpha_np.size
+    n_plot = min(10000, n_total)
+    idx = np.random.choice(n_total, size=n_plot, replace=False)
+    alpha_s = alpha_np[idx]
+    beta_s = beta_np[idx]
+    nu_s = nu_np[idx]
+
     # --- 10. Alpha vs Beta Scatter ---
-    axs[3, 0].scatter(alpha_np, beta_np, alpha=0.3, color='m')
-    axs[3, 0].set_title('10. Alpha (α) vs Beta (β)')
+    axs[3, 0].scatter(alpha_s, beta_s, alpha=0.3, color='m')
+    axs[3, 0].set_title(f'10. Alpha (α) vs Beta (β)  (n={n_plot})')
     axs[3, 0].set_xlabel('α')
     axs[3, 0].set_ylabel('β')
+    axs[3, 0].set_xscale('log')
+    axs[3, 0].set_yscale('log')
     axs[3, 0].grid(True)
 
     # --- 11. Alpha vs Nu Scatter ---
-    axs[3, 1].scatter(alpha_np, nu_np, alpha=0.3, color='brown')
-    axs[3, 1].set_title('11. Alpha (α) vs Nu (ν)')
+    axs[3, 1].scatter(alpha_s, nu_s, alpha=0.3, color='brown')
+    axs[3, 1].set_title(f'11. Alpha (α) vs Nu (ν)  (n={n_plot})')
     axs[3, 1].set_xlabel('α')
     axs[3, 1].set_ylabel('ν')
+    axs[3, 1].set_xscale('log')
+    axs[3, 1].set_yscale('log')
     axs[3, 1].grid(True)
 
     # --- 12. Nu vs Beta Scatter ---
-    axs[3, 2].scatter(nu_np, beta_np, alpha=0.3, color='teal')
-    axs[3, 2].set_title('12. Nu (ν) vs Beta (β)')
+    axs[3, 2].scatter(nu_s, beta_s, alpha=0.3, color='teal')
+    axs[3, 2].set_title(f'12. Nu (ν) vs Beta (β)  (n={n_plot})')
     axs[3, 2].set_xlabel('ν')
     axs[3, 2].set_ylabel('β')
+    axs[3, 2].set_xscale('log')
+    axs[3, 2].set_yscale('log')
     axs[3, 2].grid(True)
 
     plt.tight_layout(rect=[0, 0, 1, 0.96])
@@ -171,7 +185,7 @@ def generate_diagnostic_plots(model_version, epoch_ndx, batch_idx, model, loss_c
     fig_path = os.path.join(
         "diagnostics", model_version, f"epoch_{epoch_ndx}_batch_{batch_idx}_diagnostics.png"
     )
-    fig.savefig(fig_path, dpi=300, bbox_inches='tight')
+    fig.savefig(fig_path, dpi=200, bbox_inches='tight')
     logger.info(f"Diagnostic plots saved to {fig_path}")
     plt.close(fig)
 

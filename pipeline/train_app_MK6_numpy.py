@@ -411,6 +411,51 @@ class TrainingApp:
 
                 train_loss.backward()
 
+                if batch_idx % 50 == 0:
+                    # Always use the 80th slice (index 79) from the unshuffled training dataset
+                    dataset = train_dl.dataset
+                    slice_input, slice_truth = dataset[79]
+                    slice_input = slice_input.unsqueeze(0).float().detach()
+                    slice_truth = slice_truth.unsqueeze(0).float().detach()
+
+                    # Forward pass for that single slice
+                    slice_outputs = self.model(slice_input)
+                    gamma, nu, alpha, beta = slice_outputs
+
+                    # Compute the variance map for the slice
+                    variance_map = (beta / (alpha - 1.0 + 1e-6)) * (1.0 + 1.0 / (nu + 1e-6))
+                    variance_map = torch.squeeze(variance_map, dim=(0, 1))  # shape: H x W
+
+                    # Find the hotspot pixel in that slice
+                    max_variance_val, flat_idx = torch.max(variance_map.view(-1), 0)
+                    r, c = np.unravel_index(flat_idx.cpu().numpy(), variance_map.shape)
+
+                    # Extract values at the hotspot
+                    gamma_hotspot = gamma[0, 0, r, c].item()
+                    nu_hotspot = nu[0, 0, r, c].item()
+                    alpha_hotspot = alpha[0, 0, r, c].item()
+                    beta_hotspot = beta[0, 0, r, c].item()
+                    variance_hotspot = max_variance_val.item()
+
+                    # Compute L1 error at the hotspot
+                    truth_hotspot = slice_truth[0, 0, r, c].item()
+                    l1_error_hotspot = abs(gamma_hotspot - truth_hotspot)
+
+                    logger.debug(
+                        f"Epoch {epoch_ndx}, Batch {batch_idx}: "
+                        f"Using 80th slice hotspot pixel: ({r}, {c}), "
+                        f"Gamma: {gamma_hotspot:.4f}, Nu: {nu_hotspot:.4f}, "
+                        f"Alpha: {alpha_hotspot:.4f}, Beta: {beta_hotspot:.4f}, "
+                        f"Variance: {variance_hotspot:.4f}, L1 Error: {l1_error_hotspot:.4f}"
+                    )
+
+                    # Clean up
+                    del dataset, slice_input, slice_truth, slice_outputs
+                    del gamma, nu, alpha, beta, variance_map
+                    del max_variance_val, flat_idx, r, c
+                    del gamma_hotspot, nu_hotspot, alpha_hotspot, beta_hotspot
+                    del variance_hotspot, truth_hotspot, l1_error_hotspot
+
                 # Clip gradients if needed
                 if self.config["grad_clip"]:
                     torch.nn.utils.clip_grad_value_(
@@ -484,7 +529,7 @@ class TrainingApp:
                         nll = nig_nll(gamma, nu, alpha, beta, val_truths).mean()
                         reg = nig_reg(gamma, nu, alpha, beta, val_truths).mean()
                         u_reg = nig_u_reg(gamma, nu, alpha, beta, val_truths).mean()
-                        evidential = nll + self.config['beta_evidential_reg'] * reg + self.config['beta_evidential_u_reg'] * u_reg
+                        evidential = self.config['beta_evidential_nll'] * nll + self.config['beta_evidential_reg'] * reg + self.config['beta_evidential_u_reg'] * u_reg
                         smooth_l1 = self.criterion(gamma, val_truths)
                         val_loss = evidential + self.config['beta_evidential_smooth_l1'] * smooth_l1
 

@@ -398,7 +398,7 @@ class TrainingApp:
                     nll = nig_nll(gamma, nu, alpha, beta, train_truths).mean()
                     reg = nig_reg(gamma, nu, alpha, beta, train_truths).mean()
                     u_reg = nig_u_reg(gamma, nu, alpha, beta, train_truths).mean()
-                    evidential = nll + self.config['beta_evidential_reg'] * reg + self.config['beta_evidential_u_reg'] * u_reg
+                    evidential = self.config['beta_evidential_nll'] * nll + self.config['beta_evidential_reg'] * reg + self.config['beta_evidential_u_reg'] * u_reg
                     smooth_l1 = self.criterion(gamma, train_truths)
                     train_loss = evidential + self.config['beta_evidential_smooth_l1'] * smooth_l1
                     avg_evidence = torch.mean(2 * nu + alpha).item()

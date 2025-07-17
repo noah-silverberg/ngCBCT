@@ -1566,8 +1566,8 @@ class IResNetEvidential(nn.Module):
 
         # softplus the other channels to ensure positivity (and add 1 to alpha)
         # and an additional small bit, in case there is underflow in softplus
-        nu = F.softplus(d1[:, 1:2, :, :]) + 1e-6
-        alpha = F.softplus(d1[:, 2:3, :, :]) + 1.0 + 1e-6
-        beta = F.softplus(d1[:, 3:4, :, :]) + 1e-6
+        nu = torch.exp(d1[:, 1:2, :, :]) + 1e-6
+        alpha = torch.exp(d1[:, 2:3, :, :]) + 1.0 + 1e-6
+        beta = torch.exp(d1[:, 3:4, :, :]) + 1e-6
 
         return gamma, nu, alpha, beta

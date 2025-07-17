@@ -541,7 +541,52 @@ class TrainingApp:
                     
                     loss_components = (nll, reg, wu_reg, ye_reg, smooth_l1)
                     nig_params = (gamma, nu, alpha, beta)
-                    generate_diagnostic_plots(self.config['model_version'], epoch_ndx, batch_idx, self.model, loss_components, nig_params, train_truths)
+                    
+                    # Check if any are nan or inf
+                    if any(torch.isnan(param).any() or torch.isinf(param).any() for param in nig_params):
+                        logger.error(
+                            f"NaN or Inf detected in NIG parameters at Epoch {epoch_ndx}, Batch {batch_idx}. Ending training..."
+                        )
+                        # Clean up memory
+                        logger.debug("Cleaning up memory...")
+                        gc.collect()
+                        
+                        # Try to delete on-the-fly aggregated reconstructions
+                        if self.scans_agg_train is not None:
+                            try:
+                                os.remove(self.files.get_images_aggregate_filepath(self.config["input_type"], "TRAIN", gated=False))
+                                os.remove(self.files.get_images_aggregate_filepath(self.config["input_type"], "VALIDATION", gated=False))
+                                logger.info("Aggregated reconstructions deleted successfully.")
+                            except Exception as e:
+                                logger.error(f"Error deleting aggregated reconstructions: {e}")
+
+                        # We don't want to have the whole pipeline break if we fail to clean up memory
+                        # So we catch any exceptions that might occur during cleanup
+                        try:
+                            del self.model
+                            if self.config["tensor_board"]:
+                                del self.trn_writer, self.val_writer
+                            del self.config
+                            del self.optimizer, self.scheduler
+                            del self.criterion
+                            del train_inputs, train_truths
+                            if self.scans_agg_train is None:
+                                del train_dl, val_dl
+                            del train_outputs, val_outputs
+                            del epoch_total_train_loss, epoch_total_val_loss
+                            del epoch_avg_train_loss, epoch_avg_val_loss
+                            del avg_train_loss_values, avg_val_loss_values
+                            del self.time_str
+                            del val_inputs, val_truths
+                            del train_loss, val_loss
+                        except Exception as e:
+                            logger.error(f"Error during memory cleanup: {e}")
+
+                        with torch.no_grad():
+                            torch.cuda.empty_cache()
+                        return
+                    else:
+                        generate_diagnostic_plots(self.config['model_version'], epoch_ndx, batch_idx, self.model, loss_components, nig_params, train_truths)
 
                     # Always use the 80th slice (index 79) from the unshuffled training dataset
                     dataset = train_dl.dataset

@@ -62,65 +62,65 @@ def generate_diagnostic_plots(model_version, epoch_ndx, batch_idx, model, loss_c
     omega_np = (2.0 * beta_np * (1.0 + nu_np))
     omega_danger = np.sum(omega_np <= 0.0)
 
-    # Create a 3x3 grid for plots
-    fig, axs = plt.subplots(3, 3, figsize=(18, 15))
+    # Create a 4x3 grid for plots (add row for pairwise scatter plots)
+    fig, axs = plt.subplots(4, 3, figsize=(18, 20))
     fig.suptitle(f'Diagnostics for Epoch {epoch_ndx}, Batch {batch_idx}', fontsize=16)
 
-    # --- Plot 1: Loss Component Magnitudes ---
+    # --- 1. Loss Component Magnitudes ---
     loss_names = ['NLL', 'Reg', 'Wu-Reg', 'Ye-Reg', 'SmoothL1']
     losses = [nll.item(), reg.item(), wu_reg.item(), ye_reg.item(), smooth_l1.item()]
     axs[0, 0].bar(loss_names, losses, color='skyblue')
     axs[0, 0].set_title('1. Loss Component Magnitudes')
     axs[0, 0].set_ylabel('Loss Value')
-    axs[0, 0].set_yscale('symlog') # Use symlog to handle potentially large differences
+    axs[0, 0].set_yscale('symlog')
 
-    # --- Plot 2: Alpha ---
+    # --- 2. Alpha Distribution ---
     axs[0, 1].hist(alpha_np, bins=50, color='coral')
-    axs[0, 1].axvline(1.0, color='r', linestyle='--', label='α=1 (Unstable Boundary)')
-    axs[0, 1].set_title(f'2. Alpha (α) Distribution\n(Min: {alpha_np.min():.5f}, Mean: {alpha_np.mean():.5f})\nDanger zone (α≤1): {alpha_danger}')
+    axs[0, 1].axvline(1.0, color='r', linestyle='--', label='α=1 (Unstable)')
+    axs[0, 1].set_title(f'2. Alpha (α) Distribution\nMin: {alpha_np.min():.5f}, Mean: {alpha_np.mean():.5f}\nDanger (α≤1): {alpha_danger}')
     axs[0, 1].set_xlabel('Value')
     axs[0, 1].legend()
     axs[0, 1].set_xscale('log')
     axs[0, 1].set_yscale('log')
 
-    # --- Plot 3: Nu ---
+    # --- 3. Nu Distribution ---
     axs[0, 2].hist(nu_np, bins=50, color='mediumseagreen')
-    axs[0, 2].axvline(0.0, color='r', linestyle='--', label='ν=0 (Unstable Boundary)')
-    axs[0, 2].set_title(f'3. Nu (ν) Distribution\n(Min: {nu_np.min():.5f}, Mean: {nu_np.mean():.5f})\nDanger zone (ν≤0): {nu_danger}')
+    axs[0, 2].axvline(0.0, color='r', linestyle='--', label='ν=0 (Unstable)')
+    axs[0, 2].set_title(f'3. Nu (ν) Distribution\nMin: {nu_np.min():.5f}, Mean: {nu_np.mean():.5f}\nDanger (ν≤0): {nu_danger}')
     axs[0, 2].set_xlabel('Value')
     axs[0, 2].legend()
     axs[0, 2].set_xscale('log')
     axs[0, 2].set_yscale('log')
 
-    # --- Plot 4: Beta ---
+    # --- 4. Beta Distribution ---
     axs[1, 0].hist(beta_np, bins=50, color='plum')
-    axs[1, 0].axvline(0.0, color='r', linestyle='--', label='β=0 (Unstable Boundary)')
-    axs[1, 0].set_title(f'4. Beta (β) Distribution\n(Min: {beta_np.min():.5f}, Mean: {beta_np.mean():.5f})\nDanger zone (β≤0): {beta_danger}')
+    axs[1, 0].axvline(0.0, color='r', linestyle='--', label='β=0 (Unstable)')
+    axs[1, 0].set_title(f'4. Beta (β) Distribution\nMin: {beta_np.min():.5f}, Mean: {beta_np.mean():.5f}\nDanger (β≤0): {beta_danger}')
     axs[1, 0].set_xlabel('Value')
     axs[1, 0].legend()
     axs[1, 0].set_xscale('log')
     axs[1, 0].set_yscale('log')
 
-    # --- Plot 5: Critical Argument in Ye Regularizer ---
+    # --- 5. Ye Reg Input (exp(α-1)-1) ---
     axs[1, 1].hist(ye_reg_arg, bins=50, color='gold')
-    axs[1, 1].axvline(0.0, color='r', linestyle='--', label='Unstable Boundary (<=0)')
-    axs[1, 1].set_title(f'5. Input to log() in Ye Reg\n(Min: {ye_reg_arg.min():.5f})\nDanger zone (≤0): {ye_reg_danger}')
+    axs[1, 1].axvline(0.0, color='r', linestyle='--', label='Unstable (≤0)')
+    axs[1, 1].set_title(f'5. Input to log() in Ye Reg\nMin: {ye_reg_arg.min():.5f}\nDanger (≤0): {ye_reg_danger}')
     axs[1, 1].set_xlabel('exp(α - 1) - 1')
     axs[1, 1].legend()
     axs[1, 1].set_xscale('log')
     axs[1, 1].set_yscale('log')
 
-    # --- Plot 6: Scatter Plot of Error vs. Variance ---
+    # --- 6. Error vs. Variance ---
     variance_np = (beta_np / (alpha_np - 1.0 + 1e-6)) * (1.0 + 1.0 / (nu_np + 1e-6))
     error_np = np.abs(gamma_np - truths_np)
     axs[1, 2].scatter(error_np, variance_np, alpha=0.3)
     axs[1, 2].set_title('6. L1 Error vs. Variance')
-    axs[1, 2].set_xlabel('Absolute Error |γ - y|')
-    axs[1, 2].set_ylabel('Variance (β / (α-1))')
+    axs[1, 2].set_xlabel('|γ - y|')
+    axs[1, 2].set_ylabel('Variance')
     axs[1, 2].set_xscale('log')
     axs[1, 2].set_yscale('log')
-    
-    # --- Plot 7: Histogram of Gradient Norms ---
+
+    # --- 7. Gradient Norms ---
     grad_norms = [p.grad.norm().item() for p in model.parameters() if p.grad is not None]
     axs[2, 0].hist(grad_norms, bins=50, color='c')
     axs[2, 0].set_title('7. Gradient L2 Norms per Layer')
@@ -128,34 +128,51 @@ def generate_diagnostic_plots(model_version, epoch_ndx, batch_idx, model, loss_c
     axs[2, 0].set_xscale('log')
     axs[2, 0].set_yscale('log')
 
-    # --- Plot 8: Histogram of Prediction (gamma) ---
+    # --- 8. Prediction (Gamma) Histogram ---
     axs[2, 1].hist(gamma_np, bins=50, color='lightcoral')
-    axs[2, 1].set_title(f'8. Prediction (γ) Distribution')
+    axs[2, 1].set_title('8. Prediction (γ) Distribution')
     axs[2, 1].set_xlabel('Value')
     axs[2, 1].set_yscale('log')
 
-    # --- Plot 9: Histogram of Omega from NLL ---
+    # --- 9. Omega in NLL ---
     axs[2, 2].hist(omega_np, bins=50, color='orange')
-    axs[2, 2].axvline(0.0, color='r', linestyle='--', label='Unstable Boundary (<=0)')
-    axs[2, 2].set_title(f'9. Input to log(ω) in NLL\n(Min: {omega_np.min():.5f})\nDanger zone (≤0): {omega_danger}')
+    axs[2, 2].axvline(0.0, color='r', linestyle='--', label='Unstable (≤0)')
+    axs[2, 2].set_title(f'9. Input to log(ω) in NLL\nMin: {omega_np.min():.5f}\nDanger (≤0): {omega_danger}')
     axs[2, 2].set_xlabel('Omega (ω)')
     axs[2, 2].legend()
     axs[2, 2].set_xscale('log')
     axs[2, 2].set_yscale('log')
 
+    # --- 10. Alpha vs Beta Scatter ---
+    axs[3, 0].scatter(alpha_np, beta_np, alpha=0.3, color='m')
+    axs[3, 0].set_title('10. Alpha (α) vs Beta (β)')
+    axs[3, 0].set_xlabel('α')
+    axs[3, 0].set_ylabel('β')
+    axs[3, 0].grid(True)
+
+    # --- 11. Alpha vs Nu Scatter ---
+    axs[3, 1].scatter(alpha_np, nu_np, alpha=0.3, color='brown')
+    axs[3, 1].set_title('11. Alpha (α) vs Nu (ν)')
+    axs[3, 1].set_xlabel('α')
+    axs[3, 1].set_ylabel('ν')
+    axs[3, 1].grid(True)
+
+    # --- 12. Nu vs Beta Scatter ---
+    axs[3, 2].scatter(nu_np, beta_np, alpha=0.3, color='teal')
+    axs[3, 2].set_title('12. Nu (ν) vs Beta (β)')
+    axs[3, 2].set_xlabel('ν')
+    axs[3, 2].set_ylabel('β')
+    axs[3, 2].grid(True)
+
     plt.tight_layout(rect=[0, 0, 1, 0.96])
-    # Save the figure to a file
+
+    # Save to file
     ensure_dir(os.path.join("diagnostics", model_version))
-    fig_path =  os.path.join(
-            "diagnostics", model_version, f"epoch_{epoch_ndx}_batch_{batch_idx}_diagnostics.png"
-        )
-    fig.savefig(
-       fig_path,
-        dpi=300,
-        bbox_inches='tight'
+    fig_path = os.path.join(
+        "diagnostics", model_version, f"epoch_{epoch_ndx}_batch_{batch_idx}_diagnostics.png"
     )
+    fig.savefig(fig_path, dpi=300, bbox_inches='tight')
     logger.info(f"Diagnostic plots saved to {fig_path}")
-    # Close the figure to free memory
     plt.close(fig)
 
 def init_model(config: dict):

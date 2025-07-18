@@ -573,8 +573,10 @@ class TrainingApp:
                     loss_components = (nll, reg, wu_reg, ye_reg, smooth_l1)
                     nig_params = (gamma, nu, alpha, beta)
                     
-                    # Check if any are nan or inf
-                    if any(torch.isnan(param).any() or torch.isinf(param).any() for param in nig_params):
+                    try:
+                        generate_diagnostic_plots(self.config['model_version'], epoch_ndx, batch_idx, self.model, loss_components, nig_params, train_truths)
+                    except Exception as e:
+                        logger.error(f"Error generating diagnostic plots: {e}")
                         logger.error(
                             f"NaN or Inf detected in NIG parameters at Epoch {epoch_ndx}, Batch {batch_idx}. Ending training..."
                         )
@@ -616,8 +618,6 @@ class TrainingApp:
                         with torch.no_grad():
                             torch.cuda.empty_cache()
                         return
-                    else:
-                        generate_diagnostic_plots(self.config['model_version'], epoch_ndx, batch_idx, self.model, loss_components, nig_params, train_truths)
 
                     # Always use the 80th slice (index 79) from the unshuffled training dataset
                     dataset = train_dl.dataset

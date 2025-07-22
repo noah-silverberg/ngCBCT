@@ -192,7 +192,7 @@ def pad_and_reshape(prj: torch.Tensor):
     return prj
 
 
-def divide_sinogram(prj: torch.Tensor, v_dim: int):
+def divide_sinogram(prj: torch.Tensor, v_dim: int, patches: int = 2):
     """
     Select top/bottom angle "halves" and combine.
     So each sinogram is divided into two halves, which are then concatenated.
@@ -200,15 +200,26 @@ def divide_sinogram(prj: torch.Tensor, v_dim: int):
     Args:
         prj (torch.Tensor): shape (H, A, 512).
         v_dim (int): number of angles to select from start and end.
+        patches (int): number of patches to create (default: 2).
 
     Returns:
         torch.Tensor: shape (2*H, 1, v_dim, 512), concatenated "half"-sinograms.
     """
     # prj: [H, angles, 512]
-    # Now assemble first and last v_dim slices along H axis
-    top = prj[:, :v_dim, :]
-    bottom = prj[:, -v_dim:, :]
-    combined = torch.cat([top, bottom], dim=0)
+    if patches == 2:
+        # Now assemble first and last v_dim slices along H axis
+        top = prj[:, :v_dim, :]
+        bottom = prj[:, -v_dim:, :]
+        combined = torch.cat([top, bottom], dim=0)
+    elif patches == 3:
+        # If we want to divide into 3 patches, we take the first, middle, and last v_dim slices
+        top = prj[:, :v_dim, :]
+        middle_idx = prj.shape[1] // 2 - v_dim // 2
+        middle = prj[:, middle_idx:middle_idx + v_dim, :]
+        bottom = prj[:, -v_dim:, :]
+        combined = torch.cat([top, middle, bottom], dim=0)
+    else:
+        raise ValueError("Unsupported number of patches. Only 2 or 3 are supported.")
     combined = combined.unsqueeze(1)
-    # combined: [2*H, 1, v_dim, 512]
+    # combined: [2*H, 1, v_dim, 512] or [3*H, 1, v_dim, 512]
     return combined

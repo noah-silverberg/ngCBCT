@@ -21,7 +21,7 @@ def normalizeInputs(input_images):
     return input_images
 
 
-def normalizeInputsClip(input_images):
+def normalizeInputsClip(input_images, scan_type):
 
     # remove the first and last 20 slices
     c_max = 180
@@ -33,6 +33,9 @@ def normalizeInputsClip(input_images):
 
     # normalize input to [0, 1]
     input_images *= 25.0
+
+    if scan_type == "FF":
+        input_images = input_images[:, 128:-128, 128:-128]
 
     return input_images
 

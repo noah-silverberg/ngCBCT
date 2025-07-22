@@ -57,7 +57,11 @@ def generate_diagnostic_plots(model_version, epoch_ndx, batch_idx, model, loss_c
     alpha_danger = np.sum(alpha_np <= 1.0)
     nu_danger = np.sum(nu_np <= 0.0)
     beta_danger = np.sum(beta_np <= 0.0)
-    ye_reg_arg = np.exp(alpha_np - 1) - 1
+    ye_reg_arg = np.where(
+        alpha_np < 20,
+        np.expm1(alpha_np - 1),  # Stable calculation for alpha < 20
+        alpha_np - 1            # Linear approximation for alpha >= 20
+    )
     ye_reg_danger = np.sum(ye_reg_arg <= 0.0)
     omega_np = (2.0 * beta_np * (1.0 + nu_np))
     omega_danger = np.sum(omega_np <= 0.0)
@@ -121,12 +125,11 @@ def generate_diagnostic_plots(model_version, epoch_ndx, batch_idx, model, loss_c
     axs[1, 2].set_yscale('log')
 
     # --- 7. Gradient Norms ---
-    grad_norms = [p.grad.norm().item() for p in model.parameters() if p.grad is not None]
+    grad_norms = [p.grad.norm().item() + 1e-12 for p in model.parameters() if p.grad is not None]
     axs[2, 0].hist(grad_norms, bins=50, color='c')
     axs[2, 0].set_title('7. Gradient L2 Norms per Layer')
     axs[2, 0].set_xlabel('Gradient Norm')
     axs[2, 0].set_xscale('log')
-    axs[2, 0].set_yscale('log')
 
     # --- 8. Prediction (Gamma) Histogram ---
     axs[2, 1].hist(gamma_np, bins=50, color='lightcoral')
@@ -216,7 +219,44 @@ def nig_wu_reg(gamma, nu, alpha, beta, y_true):
 
 def nig_ye_reg(gamma, nu, alpha, beta, y_true):
     # From Ye et al. "Uncertainty Regularized Evidential Regression"
-    return -torch.abs(y_true - gamma) * torch.log(torch.exp(alpha - 1) - 1)
+    # For stabiliity, we use a piecewise function that is exact for alpha < 20
+    # and approximates the log function for alpha >= 20.
+    # this is a very good approximation for alpha >= 20
+
+    y = alpha - 1
+    condition = alpha < 20
+
+    regularizer_term = torch.where(
+        condition,
+        torch.log(torch.expm1(y)),  # Stable calculation for alpha < 20
+        y                          # Linear approximation for alpha >= 20
+    )
+    
+    return -torch.abs(y_true - gamma) * regularizer_term
+
+def nig_beta_reg(gamma, nu, alpha, beta, y_true):
+    # New term, identical to Ye term except for beta, and we want beta > 0 instead of alpha > 1
+    y = beta
+    condition = beta < 20
+    regularizer_term = torch.where(
+        condition,
+        torch.log(torch.expm1(y)),  # Stable calculation for beta < 20
+        y                          # Linear approximation for beta >= 20
+    )
+
+    return -torch.abs(y_true - gamma) * regularizer_term
+
+def nig_nu_reg(gamma, nu, alpha, beta, y_true):
+    # New term, identical to Ye term except for nu, and we want nu > 0 instead of alpha > 1
+    y = nu
+    condition = nu < 20
+    regularizer_term = torch.where(
+        condition,
+        torch.log(torch.expm1(y)),  # Stable calculation for nu < 20
+        y                          # Linear approximation for nu >= 20
+    )
+
+    return -torch.abs(y_true - gamma) * regularizer_term
 
 def init_loss(config: dict, is_bayesian: bool, is_evidential: bool = False):
     """
@@ -557,9 +597,37 @@ class TrainingApp:
                     reg = nig_reg(gamma, nu, alpha, beta, train_truths).mean()
                     wu_reg = nig_wu_reg(gamma, nu, alpha, beta, train_truths).mean()
                     ye_reg = nig_ye_reg(gamma, nu, alpha, beta, train_truths).mean()
-                    evidential = self.config['beta_evidential_nll'] * nll + self.config['beta_evidential_reg'] * reg + self.config['beta_evidential_wu_reg'] * wu_reg + self.config['beta_evidential_ye_reg'] * ye_reg
+                    nu_reg = nig_nu_reg(gamma, nu, alpha, beta, train_truths).mean()
+                    beta_reg = nig_beta_reg(gamma, nu, alpha, beta, train_truths).mean()
+                    evidential = self.config['beta_evidential_nll'] * nll + self.config['beta_evidential_reg'] * reg + self.config['beta_evidential_wu_reg'] * wu_reg + self.config['beta_evidential_ye_reg'] * ye_reg + self.config['beta_evidential_nu_reg'] * nu_reg + self.config['beta_evidential_beta_reg'] * beta_reg
                     smooth_l1 = self.criterion(gamma, train_truths)
-                    train_loss = evidential + self.config['beta_evidential_smooth_l1'] * smooth_l1
+
+                    # Annealing schedule for evidential term over first epoch (increases each batch)
+                    total_anneal_steps = num_batches
+                    current_step = (epoch_ndx - 1) * num_batches + batch_idx + 1
+                    c = 1e-2 # shape constant
+                    T = torch.tensor(total_anneal_steps, dtype=torch.float32)
+                    x = torch.tensor(current_step, dtype=torch.float32)
+
+                    half_T = T / 2.0
+
+                    numerator = torch.sigmoid(c * (x - half_T)) - torch.sigmoid(-c * half_T)
+                    denominator = torch.sigmoid(c * half_T) - torch.sigmoid(-c * half_T)
+
+                    # To avoid division by zero if T=0, add a small epsilon
+                    anneal_coeff = numerator / (denominator + 1e-9)
+
+                    # Clamp and convert back to a float for logging
+                    anneal_coeff = torch.clamp(anneal_coeff, min=1e-4, max=1.0).item()
+                    if batch_idx % 200 == 0:
+                        logger.debug(f"Epoch {epoch_ndx}, Batch {batch_idx}: Anneal Coeff: {anneal_coeff:.4f}")
+
+                    if any(torch.isnan(t).any() or torch.isinf(t).any() for t in [nll, reg, wu_reg, ye_reg, smooth_l1, nu_reg, beta_reg]):
+                        logger.error(f"NaN or Inf detected in loss components at Epoch {epoch_ndx}, Batch {batch_idx}")
+                        logger.debug(f"Loss components: NLL: {nll}, Reg: {reg}, Wu Reg: {wu_reg}, Ye Reg: {ye_reg}, Nu Reg: {nu_reg}, Beta Reg: {beta_reg}, SmoothL1Loss: {smooth_l1}")
+
+                    # combine losses with annealed evidential term
+                    train_loss = anneal_coeff * evidential + self.config['beta_evidential_smooth_l1'] * smooth_l1
                     avg_evidence = torch.mean(2 * nu + alpha).item()
                 else:
                     # Standard loss for a deterministic model
@@ -567,8 +635,8 @@ class TrainingApp:
 
                 train_loss.backward()
 
-                if batch_idx % 250 == 0 and self.is_evidential:
-                    logger.debug(f"Epoch {epoch_ndx}, Batch {batch_idx}: NLL: {nll.item():.4f}, Reg: {reg.item():.4f}, Wu Reg: {wu_reg.item():.4f}, Ye Reg: {ye_reg.item():.4f}, SmoothL1Loss: {smooth_l1.item():.4f}, Avg Evidence: {avg_evidence:.4f}")
+                if (batch_idx % 500 == 0 or batch_idx == num_batches - 1) and self.is_evidential:
+                    logger.debug(f"Epoch {epoch_ndx}, Batch {batch_idx}: NLL: {nll.item():.4f}, Reg: {reg.item():.4f}, Wu Reg: {wu_reg.item():.4f}, Ye Reg: {ye_reg.item():.4f}, Nu Reg: {nu_reg.item():.4f}, Beta Reg: {beta_reg.item():.4f}, SmoothL1Loss: {smooth_l1.item():.4f}, Avg Evidence: {avg_evidence:.4f}")
                     
                     loss_components = (nll, reg, wu_reg, ye_reg, smooth_l1)
                     nig_params = (gamma, nu, alpha, beta)
@@ -738,7 +806,9 @@ class TrainingApp:
                         reg = nig_reg(gamma, nu, alpha, beta, val_truths).mean()
                         wu_reg = nig_wu_reg(gamma, nu, alpha, beta, val_truths).mean()
                         ye_reg = nig_ye_reg(gamma, nu, alpha, beta, val_truths).mean()
-                        evidential = self.config['beta_evidential_nll'] * nll + self.config['beta_evidential_reg'] * reg + self.config['beta_evidential_wu_reg'] * wu_reg + self.config['beta_evidential_ye_reg'] * ye_reg
+                        nu_reg = nig_nu_reg(gamma, nu, alpha, beta, val_truths).mean()
+                        beta_reg = nig_beta_reg(gamma, nu, alpha, beta, val_truths).mean()
+                        evidential = self.config['beta_evidential_nll'] * nll + self.config['beta_evidential_reg'] * reg + self.config['beta_evidential_wu_reg'] * wu_reg + self.config['beta_evidential_ye_reg'] * ye_reg + self.config['beta_evidential_nu_reg'] * nu_reg + self.config['beta_evidential_beta_reg'] * beta_reg
                         smooth_l1 = self.criterion(gamma, val_truths)
                         val_loss = evidential + self.config['beta_evidential_smooth_l1'] * smooth_l1
 

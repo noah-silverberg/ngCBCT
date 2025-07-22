@@ -236,6 +236,7 @@ def apply_model_to_recons(
     model: torch.nn.Module,
     pt_path: str,
     device: torch.device,
+    scan_type: str,
     train_at_inference: bool = False, # for MC dropout
     _batch_size: int = 8, # Number of slices to process at once
 ):
@@ -246,7 +247,7 @@ def apply_model_to_recons(
     # Load the nonstop-gated reconstruction
     # NOTE: These each have shape (160, 512, 512) for HF and shape (160, 256, 256) for FF
     recon = torch.load(pt_path).detach().to(device)
-    recon = normalizeInputsClip(recon)
+    recon = normalizeInputsClip(recon, scan_type)
     recon = torch.unsqueeze(recon, 1)  # Add channel dimension
 
     if train_at_inference:

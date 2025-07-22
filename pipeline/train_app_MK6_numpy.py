@@ -431,8 +431,8 @@ class TrainingApp:
         if self.scans_agg_train is None:
             logger.debug("Using same dataset for all epochs...")
             # Get the dataloaders for training and validation
-            train_dl = init_dataloader(self.config, self.files, "TRAIN", self.config["input_type"], self.config['domain'])
-            val_dl = init_dataloader(self.config, self.files, "VALIDATION", self.config["input_type"], self.config['domain'])
+            train_dl = init_dataloader(self.config, self.files, "TRAIN", self.config["input_type"], self.config['domain'], augment_on_fly=self.config['domain'] == 'IMAG', recon_len=160)
+            val_dl = init_dataloader(self.config, self.files, "VALIDATION", self.config["input_type"], self.config['domain'], augment_on_fly=self.config['domain'] == 'IMAG', recon_len=160)
 
         # Initialize the tensorboard writers if enabled
         if self.config["tensor_board"]:
@@ -484,12 +484,12 @@ class TrainingApp:
 
                 # 3. Aggregate and save the reconstructions from the file paths
                 ng_agg_train_path = self.files.get_images_aggregate_filepath(input_type, "TRAIN", gated=False)
-                aggregate_saved_recons(ng_train_paths, augment=False, out_path=ng_agg_train_path)
+                aggregate_saved_recons(ng_train_paths, out_path=ng_agg_train_path)
                 logger.info(f"Aggregated and saved training data for epoch {epoch_ndx}.")
 
                 # 4. Aggregate and save the validation reconstructions
                 ng_agg_val_path = self.files.get_images_aggregate_filepath(input_type, "VALIDATION", gated=False)
-                aggregate_saved_recons(ng_val_paths, augment=False, out_path=ng_agg_val_path)
+                aggregate_saved_recons(ng_val_paths, out_path=ng_agg_val_path)
                 logger.info(f"Aggregated and saved validation data for epoch {epoch_ndx}.")
 
                 # 5. Initialize the training dataloader using the file we just created

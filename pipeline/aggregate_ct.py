@@ -9,14 +9,13 @@ from numpy.lib.format import open_memmap
 logger = logging.getLogger("pipeline")
 
 
-def aggregate_saved_recons(paths: list[str], augment: bool, out_path: str, scan_type: str):
+def aggregate_saved_recons(paths: list[str], out_path: str, scan_type: str):
     """
     Load per-scan reconstruction tensors, concatenate across scans, and save aggregates
     directly to a memory-mapped file to avoid high RAM usage.
 
     Args:
         paths (list[str]): A list of file paths for the reconstruction tensors to aggregate.
-        augment (bool): If True, applies horizontal and vertical flips, tripling the data size.
         out_path (str): The path to the output .npy file where the aggregated data will be saved.
         scan_type (str): The type of scan, either "FF" or "HF".
     """
@@ -33,11 +32,8 @@ def aggregate_saved_recons(paths: list[str], augment: bool, out_path: str, scan_
     num_slices_per_recon = recon_shape[0]
     num_recons = len(paths)
     
-    # The augmentation factor triples the number of slices
-    augmentation_factor = 3 if augment else 1
-    
     final_shape = (
-        num_recons * num_slices_per_recon * augmentation_factor,
+        num_recons * num_slices_per_recon,
         recon_shape[1], # channel
         recon_shape[2], # height
         recon_shape[3]  # width
@@ -57,19 +53,10 @@ def aggregate_saved_recons(paths: list[str], augment: bool, out_path: str, scan_
         recon = normalizeInputsClip(recon, scan_type)
         recon = torch.unsqueeze(recon, 1)
 
-        start_idx = i * num_slices_per_recon * augmentation_factor
-        end_idx = (i + 1) * num_slices_per_recon * augmentation_factor
+        start_idx = i * num_slices_per_recon
+        end_idx = (i + 1) * num_slices_per_recon
 
-        if augment:
-            # We need to handle the slices for original, flipped_h, and flipped_v
-            orig_end = start_idx + num_slices_per_recon
-            flip_h_end = orig_end + num_slices_per_recon
-            
-            recon_agg_memmap[start_idx:orig_end, ...] = recon.numpy()
-            recon_agg_memmap[orig_end:flip_h_end, ...] = recon.flip(2).numpy()
-            recon_agg_memmap[flip_h_end:end_idx, ...] = recon.flip(3).numpy()
-        else:
-            recon_agg_memmap[start_idx:end_idx, ...] = recon.numpy()
+        recon_agg_memmap[start_idx:end_idx, ...] = recon.numpy()
         
         del recon
 

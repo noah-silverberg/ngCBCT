@@ -271,10 +271,10 @@ class PairNumpySet(Dataset):
         # Load only metadata (not full tensors)
         self.tensor_1 = np.load(tensor_path_1, mmap_mode="r")
         self.tensor_2 = np.load(tensor_path_2, mmap_mode="r")
-        factor = 3 if augment_on_fly else 1
-        if self.tensor_1.shape[0] * factor != self.tensor_2.shape[0] or self.tensor_1.shape[1:] != self.tensor_2.shape[1:]:
+        if self.tensor_1.shape != self.tensor_2.shape:
             raise ValueError("Tensors must have the same shape.")
-        self.length = self.tensor_2.shape[0]  # Number of samples
+        factor = 3 if augment_on_fly else 1
+        self.length = self.tensor_1.shape[0] * factor  # Number of samples
         self.device = device
         self.augment_on_fly = augment_on_fly
         self.recon_len = recon_len
@@ -292,11 +292,14 @@ class PairNumpySet(Dataset):
             vol_num = idx // (3 * self.recon_len)
             if (idx // self.recon_len) % 3 == 0:
                 img1 = torch.tensor(self.tensor_1[slice_idx + vol_num * self.recon_len]).to(self.device)
+                img2 = torch.tensor(self.tensor_2[slice_idx + vol_num * self.recon_len]).to(self.device)
             elif (idx // self.recon_len) % 3 == 1:
                 img1 = torch.tensor(self.tensor_1[slice_idx + vol_num * self.recon_len]).flip(1).to(self.device)
+                img2 = torch.tensor(self.tensor_2[slice_idx + vol_num * self.recon_len]).flip(1).to(self.device)
             else:
                 img1 = torch.tensor(self.tensor_1[slice_idx + vol_num * self.recon_len]).flip(2).to(self.device)
+                img2 = torch.tensor(self.tensor_2[slice_idx + vol_num * self.recon_len]).flip(2).to(self.device)
         else:
             img1 = torch.tensor(self.tensor_1[idx]).to(self.device)
-        img2 = torch.tensor(self.tensor_2[idx]).to(self.device)
+            img2 = torch.tensor(self.tensor_2[idx]).to(self.device)
         return img1, img2  # Return as a paired sample

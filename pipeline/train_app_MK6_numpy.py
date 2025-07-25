@@ -525,12 +525,12 @@ class TrainingApp:
                 # 3. Aggregate and save the reconstructions from the file paths
                 st = self.scans_agg_train[0][2]  # all scans have the same type
                 ng_agg_train_path = self.files.get_images_aggregate_filepath(input_type, "TRAIN", gated=False)
-                aggregate_saved_recons(ng_train_paths, augment=False, out_path=ng_agg_train_path, scan_type=st)
+                aggregate_saved_recons(ng_train_paths, out_path=ng_agg_train_path, scan_type=st)
                 logger.info(f"Aggregated and saved training data for epoch {epoch_ndx}.")
 
                 # 4. Aggregate and save the validation reconstructions
                 ng_agg_val_path = self.files.get_images_aggregate_filepath(input_type, "VALIDATION", gated=False)
-                aggregate_saved_recons(ng_val_paths, augment=False, out_path=ng_agg_val_path, scan_type=st)
+                aggregate_saved_recons(ng_val_paths, out_path=ng_agg_val_path, scan_type=st)
                 logger.info(f"Aggregated and saved validation data for epoch {epoch_ndx}.")
 
                 # 5. Initialize the training dataloader using the file we just created

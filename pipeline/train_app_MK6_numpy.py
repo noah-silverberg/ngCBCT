@@ -345,8 +345,8 @@ def init_dataloader(config: dict, files: Files, sample: str, input_type: str, do
         images_path = files.get_projections_aggregate_filepath(sample, gated=False)
         truth_images_path = files.get_projections_aggregate_filepath(sample, gated=True)
     else:
-        images_path = files.get_images_aggregate_filepath(input_type, sample, gated=False)
-        truth_images_path = files.get_images_aggregate_filepath('fdk', sample, gated=True) # always use FDK for ground truth
+        images_path = files.get_images_aggregate_filepath(input_type, sample, truth=False)
+        truth_images_path = files.get_images_aggregate_filepath('fdk', sample, truth=True) # always use FDK for ground truth
     
     logger.debug(f"{sample} images path: {images_path}")
     logger.debug(f"{sample} ground truth images path: {truth_images_path}")
@@ -524,12 +524,12 @@ class TrainingApp:
 
                 # 3. Aggregate and save the reconstructions from the file paths
                 st = self.scans_agg_train[0][2]  # all scans have the same type
-                ng_agg_train_path = self.files.get_images_aggregate_filepath(input_type, "TRAIN", gated=False)
+                ng_agg_train_path = self.files.get_images_aggregate_filepath(input_type, "TRAIN", truth=False)
                 aggregate_saved_recons(ng_train_paths, out_path=ng_agg_train_path, scan_type=st)
                 logger.info(f"Aggregated and saved training data for epoch {epoch_ndx}.")
 
                 # 4. Aggregate and save the validation reconstructions
-                ng_agg_val_path = self.files.get_images_aggregate_filepath(input_type, "VALIDATION", gated=False)
+                ng_agg_val_path = self.files.get_images_aggregate_filepath(input_type, "VALIDATION", truth=False)
                 aggregate_saved_recons(ng_val_paths, out_path=ng_agg_val_path, scan_type=st)
                 logger.info(f"Aggregated and saved validation data for epoch {epoch_ndx}.")
 
@@ -656,8 +656,8 @@ class TrainingApp:
                         # Try to delete on-the-fly aggregated reconstructions
                         if self.scans_agg_train is not None:
                             try:
-                                os.remove(self.files.get_images_aggregate_filepath(self.config["input_type"], "TRAIN", gated=False))
-                                os.remove(self.files.get_images_aggregate_filepath(self.config["input_type"], "VALIDATION", gated=False))
+                                os.remove(self.files.get_images_aggregate_filepath(self.config["input_type"], "TRAIN", truth=False))
+                                os.remove(self.files.get_images_aggregate_filepath(self.config["input_type"], "VALIDATION", truth=False))
                                 logger.info("Aggregated reconstructions deleted successfully.")
                             except Exception as e:
                                 logger.error(f"Error deleting aggregated reconstructions: {e}")
@@ -902,8 +902,8 @@ class TrainingApp:
         # Try to delete on-the-fly aggregated reconstructions
         if self.scans_agg_train is not None:
             try:
-                os.remove(self.files.get_images_aggregate_filepath(self.config["input_type"], "TRAIN", gated=False))
-                os.remove(self.files.get_images_aggregate_filepath(self.config["input_type"], "VALIDATION", gated=False))
+                os.remove(self.files.get_images_aggregate_filepath(self.config["input_type"], "TRAIN", truth=False))
+                os.remove(self.files.get_images_aggregate_filepath(self.config["input_type"], "VALIDATION", truth=False))
                 logger.info("Aggregated reconstructions deleted successfully.")
             except Exception as e:
                 logger.error(f"Error deleting aggregated reconstructions: {e}")

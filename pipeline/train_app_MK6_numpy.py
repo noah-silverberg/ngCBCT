@@ -338,16 +338,15 @@ def init_tensorboard_writers(config: dict, time_str):
     return trn_writer, val_writer
 
 
-def init_dataloader(config: dict, files: Files, sample: str, input_type: str, domain: str, augment_on_fly: bool = False, recon_len: int = None):
+def init_dataloader(config: dict, files: Files, sample: str, input_type: str, domain: str, augment_on_fly: bool = False, recon_len: int = None, error: bool = False):
     """Initialize the DataLoader for a specific sample ('TRAIN', 'VALIDATION', or 'TEST')."""
     # Get the paths to the training data
     if domain == "PROJ":
         images_path = files.get_projections_aggregate_filepath(sample, gated=False)
         truth_images_path = files.get_projections_aggregate_filepath(sample, gated=True)
     else:
-        images_path = files.get_images_aggregate_filepath(input_type, sample, truth=False)
-        truth_images_path = files.get_images_aggregate_filepath('fdk', sample, truth=True) # always use FDK for ground truth
-    
+        images_path = files.get_images_aggregate_filepath(input_type, sample, truth=False, error=error)
+        truth_images_path = files.get_images_aggregate_filepath('fdk', sample, truth=True, error=error) # always use FDK for ground truth
     logger.debug(f"{sample} images path: {images_path}")
     logger.debug(f"{sample} ground truth images path: {truth_images_path}")
 
@@ -501,42 +500,144 @@ class TrainingApp:
 
                 input_type = self.config['input_type']
 
-                # Map epoch number (1-50) to passthrough number (0-49)
-                passthrough_num = epoch_ndx - 1
+                # If the input type is a dict, we assume it is an error-predicting auxiliary model
+                # The input type is of the form {'PD': ['v1', 10], 'ID': ['v2', 1]}
+                error = isinstance(input_type, dict)
 
-                # 1. Get the list of reconstruction file paths for the current passthrough
-                ng_train_paths = [self.files.get_recon_filepath(
-                                model_version=input_type,
-                                patient=patient,
-                                scan=scan,
-                                scan_type=st,
-                                gated=False,
-                                passthrough_num=passthrough_num
-                            ) for patient, scan, st in self.scans_agg_train]
-                ng_val_paths = [self.files.get_recon_filepath(
-                                model_version=input_type,
-                                patient=patient,
-                                scan=scan,
-                                scan_type=st,
-                                gated=False,
-                                passthrough_num=passthrough_num
-                            ) for patient, scan, st in self.scans_agg_val]
+                if error:
+                    if input_type['PD'][1] != input_type['ID'][1]:
+                        raise ValueError("The passthrough count for PD and ID must be the same.")
 
-                # 3. Aggregate and save the reconstructions from the file paths
-                st = self.scans_agg_train[0][2]  # all scans have the same type
-                ng_agg_train_path = self.files.get_images_aggregate_filepath(input_type, "TRAIN", truth=False)
-                aggregate_saved_recons(ng_train_paths, out_path=ng_agg_train_path, scan_type=st)
-                logger.info(f"Aggregated and saved training data for epoch {epoch_ndx}.")
+                    passthrough_num = epoch_ndx - 1
 
-                # 4. Aggregate and save the validation reconstructions
-                ng_agg_val_path = self.files.get_images_aggregate_filepath(input_type, "VALIDATION", truth=False)
-                aggregate_saved_recons(ng_val_paths, out_path=ng_agg_val_path, scan_type=st)
-                logger.info(f"Aggregated and saved validation data for epoch {epoch_ndx}.")
+                    ng_train_paths = []
+                    ng_train_paths.append([self.files.get_recon_filepath(
+                                    model_version='nsg',
+                                    patient=patient,
+                                    scan=scan,
+                                    scan_type=st,
+                                    gated=False,
+                                ) for patient, scan, st in self.scans_agg_train])
+                    ng_train_paths.append([self.files.get_recon_filepath(
+                                    model_version=input_type['PD'][0],
+                                    patient=patient,
+                                    scan=scan,
+                                    scan_type=st,
+                                    gated=False,
+                                    passthrough_num=passthrough_num
+                                ) for patient, scan, st in self.scans_agg_train])
+                    ng_train_paths.append([self.files.get_images_results_filepath(
+                                    model_version=input_type['ID'][0],
+                                    patient=patient,
+                                    scan=scan,
+                                    passthrough_num=passthrough_num
+                                ) for patient, scan, st in self.scans_agg_train])
+                    
+                    g_train_paths = []
+                    g_train_paths.append([self.files.get_images_results_filepath(
+                                    model_version=input_type['ID'][0],
+                                    patient=patient,
+                                    scan=scan,
+                                    passthrough_num=passthrough_num
+                                ) for patient, scan, st in self.scans_agg_train])
+                    g_train_paths.append([self.files.get_recon_filepath(
+                                    model_version='fdk',
+                                    patient=patient,
+                                    scan=scan,
+                                    scan_type=st,
+                                    gated=True,
+                                ) for patient, scan, st in self.scans_agg_train])
+
+                    
+                    ng_val_paths = []
+                    ng_val_paths.append([self.files.get_recon_filepath(
+                                    model_version='nsg',
+                                    patient=patient,
+                                    scan=scan,
+                                    scan_type=st,
+                                    gated=False,
+                                ) for patient, scan, st in self.scans_agg_val])
+                    ng_val_paths.append([self.files.get_recon_filepath(
+                                    model_version=input_type['PD'][0],
+                                    patient=patient,
+                                    scan=scan,
+                                    scan_type=st,
+                                    gated=False,
+                                    passthrough_num=passthrough_num
+                                ) for patient, scan, st in self.scans_agg_val])
+                    ng_val_paths.append([self.files.get_images_results_filepath(
+                                    model_version=input_type['ID'][0],
+                                    patient=patient,
+                                    scan=scan,
+                                    passthrough_num=passthrough_num
+                                ) for patient, scan, st in self.scans_agg_val])
+                    
+                    g_val_paths = []
+                    g_val_paths.append([self.files.get_images_results_filepath(
+                                    model_version=input_type['ID'][0],
+                                    patient=patient,
+                                    scan=scan,
+                                    passthrough_num=passthrough_num
+                                ) for patient, scan, st in self.scans_agg_val])
+                    g_val_paths.append([self.files.get_recon_filepath(
+                                    model_version='fdk',
+                                    patient=patient,
+                                    scan=scan,
+                                    scan_type=st,
+                                    gated=True,
+                                ) for patient, scan, st in self.scans_agg_val])
+                    
+                    # Aggregate and save the reconstructions from the file paths
+                    st = self.scans_agg_train[0][2]  # all scans have the same type
+                    ng_agg_train_path = self.files.get_images_aggregate_filepath(input_type, "TRAIN", truth=False, error=error)
+                    g_agg_train_path = self.files.get_images_aggregate_filepath(input_type, "TRAIN", truth=True, error=error)
+                    aggregate_saved_recons(ng_train_paths, out_path=ng_agg_train_path, scan_type=st)
+                    aggregate_saved_recons(g_train_paths, out_path=g_agg_train_path, scan_type=st)
+                    logger.info(f"Aggregated and saved training data for epoch {epoch_ndx}.")
+
+                    # Aggregate and save the validation reconstructions
+                    ng_agg_val_path = self.files.get_images_aggregate_filepath(input_type, "VALIDATION", truth=False, error=error)
+                    g_agg_val_path = self.files.get_images_aggregate_filepath(input_type, "VALIDATION", truth=True, error=error)
+                    aggregate_saved_recons(ng_val_paths, out_path=ng_agg_val_path, scan_type=st)
+                    aggregate_saved_recons(g_val_paths, out_path=g_agg_val_path, scan_type=st)
+                    logger.info(f"Aggregated and saved validation data for epoch {epoch_ndx}.")
+                else:
+                    # Map epoch number (1-50) to passthrough number (0-49)
+                    passthrough_num = epoch_ndx - 1
+
+                    # 1. Get the list of reconstruction file paths for the current passthrough
+                    ng_train_paths = [self.files.get_recon_filepath(
+                                    model_version=input_type,
+                                    patient=patient,
+                                    scan=scan,
+                                    scan_type=st,
+                                    gated=False,
+                                    passthrough_num=passthrough_num
+                                ) for patient, scan, st in self.scans_agg_train]
+                    ng_val_paths = [self.files.get_recon_filepath(
+                                    model_version=input_type,
+                                    patient=patient,
+                                    scan=scan,
+                                    scan_type=st,
+                                    gated=False,
+                                    passthrough_num=passthrough_num
+                                ) for patient, scan, st in self.scans_agg_val]
+
+                    # 3. Aggregate and save the reconstructions from the file paths
+                    st = self.scans_agg_train[0][2]  # all scans have the same type
+                    ng_agg_train_path = self.files.get_images_aggregate_filepath(input_type, "TRAIN", truth=False, error=error)
+                    aggregate_saved_recons(ng_train_paths, out_path=ng_agg_train_path, scan_type=st)
+                    logger.info(f"Aggregated and saved training data for epoch {epoch_ndx}.")
+
+                    # 4. Aggregate and save the validation reconstructions
+                    ng_agg_val_path = self.files.get_images_aggregate_filepath(input_type, "VALIDATION", truth=False, error=error)
+                    aggregate_saved_recons(ng_val_paths, out_path=ng_agg_val_path, scan_type=st)
+                    logger.info(f"Aggregated and saved validation data for epoch {epoch_ndx}.")
 
                 # 5. Initialize the training dataloader using the file we just created
                 logger.info(f"Initializing training dataloaders for epoch {epoch_ndx}.")
-                train_dl = init_dataloader(self.config, self.files, "TRAIN", self.config["input_type"], self.config['domain'], augment_on_fly=True, recon_len=160)
-                val_dl = init_dataloader(self.config, self.files, "VALIDATION", self.config["input_type"], self.config['domain'], augment_on_fly=True, recon_len=160)
+                train_dl = init_dataloader(self.config, self.files, "TRAIN", self.config["input_type"], self.config['domain'], augment_on_fly=True, recon_len=160, error=error)
+                val_dl = init_dataloader(self.config, self.files, "VALIDATION", self.config["input_type"], self.config['domain'], augment_on_fly=True, recon_len=160, error=error)
 
             logger.debug(
                 f"Learning rate is {self.scheduler.get_last_lr()[0]} at epoch {epoch_ndx}."

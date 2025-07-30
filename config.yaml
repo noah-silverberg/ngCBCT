@@ -27,15 +27,14 @@ PD_settings:
   passthrough_count: 10 #  The number of passthroughs to use when creating outputs for the model (for deterministic models 1, for probabilistic you'll probably want >1)
   is_bayesian: false # Whether the model is BBB
   beta_BBB: 1e-2 # Only for BBB, constant factor for the KL divergence term (≠ 1 for tempered Bayesian)
-
-  swag_enabled: true
-  swag_model_version: 'MK7_SWAG_TEST' # The model version to load
-  swag_start_model_version: 'MK7_01' # The model version to start from for SWA
-  swag_start_checkpoint_epoch: 50 # The checkpoint epoch to load from that model
-  swag_burn_in_epochs: 0 # Epochs to fine-tune before starting SWA (can be 0)
-  swag_swa_epochs: 1 # Number of epochs to perform SWA
-  swag_lr: 1e-4 # Constant learning rate for SWA epochs
-  swag_cov_mat_rank: 1 # Rank of the SWAG covariance matrix
+  is_evidential: false # Whether the model is evidential
+  beta_evidential_reg: 1e-3 # Only for evidential, constant factor for the regularization term from Amini et al.
+  beta_evidential_smooth_l1: 1 # Only for evidential, constant factor for the smooth L1 loss term
+  beta_evidential_nll: 1 # Only for evidential, constant factor for the negative log-likelihood term
+  beta_evidential_ye_reg: 1e-3 # Only for evidential, constant factor for the regularization term from Ye et al.
+  beta_evidential_wu_reg: 1e-3 # Only for evidential, constant factor for the regularization term from Wu et al.
+  beta_evidential_nu_reg: 1e-3 # Only for evidential, constant factor for the regularization term for nu
+  beta_evidential_beta_reg: 1e-3 # Only for evidential, constant factor for the regularization term for beta
     
   # Ignore -- not used for PD training (just have to be defined)
   input_type: null
@@ -65,22 +64,20 @@ ID_settings:
   train_at_inference: false
   ensemble_size: 1
   scan_type: "HF"
-  input_type: "MK7_MCDROPOUT_30_pct_NEW" # Input type for ID training, i.e., PL or some trained & reconstructed PD model name
+
+  # Input type for ID training, i.e., PL or some trained & reconstructed PD model name
+  # Use a dict for auxiliary error-based models with the input names and passthrough counts, e.g., {"PD": ["v1", 50], "ID": ["v1", 1]}
+  input_type: "MK7_MCDROPOUT_30_pct_NEW"
+
   input_type_match_ensemble: true # When training an ensemble, whether the input type should have an extra identifier (e.g., _01) which matches the ID model name
   passthrough_count: 1
   is_bayesian: false
   beta_BBB: 1e-1
-  is_evidential: true
+  is_evidential: false
   beta_evidential_reg: 1e-3
-  beta_evidential_smooth_l1: 10
-
-  swag_enabled: false
-  swag_model_version: 'MK7_SWAG_TEST' # The model version to load
-  swag_start_model_version: 'MK7_01' # The model version to start from for SWA
-  swag_start_checkpoint_epoch: 50 # The checkpoint epoch to load from that model
-  swag_burn_in_epochs: 0 # Epochs to fine-tune before starting SWA (can be 0)
-  swag_swa_epochs: 1 # Number of epochs to perform SWA
-  swag_lr: 1e-4 # Constant learning rate for SWA epochs
-  swag_cov_mat_rank: 1 # Rank of the SWAG covariance matrix
-  swag_momentum: 0.0
-  swag_weight_decay: 1e-4
+  beta_evidential_smooth_l1: 1
+  beta_evidential_nll: 1
+  beta_evidential_ye_reg: 1e-3
+  beta_evidential_wu_reg: 1e-3
+  beta_evidential_nu_reg: 1e-3
+  beta_evidential_beta_reg: 1e-3

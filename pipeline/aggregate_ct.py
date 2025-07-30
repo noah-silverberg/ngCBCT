@@ -9,30 +9,44 @@ from numpy.lib.format import open_memmap
 logger = logging.getLogger("pipeline")
 
 
-def aggregate_saved_recons(paths: list[str] | list[list[str]], out_path: str, scan_type: str):
+def aggregate_saved_recons(paths: list[str] | list[list[str]], out_path: str, scan_type: str, compute_errors: bool = False):
     """
     Load per-scan reconstruction tensors, concatenate across scans, and save aggregates
     directly to a memory-mapped file to avoid high RAM usage.
 
     Args:
         paths (list[str], list[list[str]]): A list of file paths for the reconstruction tensors to aggregate.
-            If a list of lists is provided, the sublists will be used as separate channels.
+            If a list of lists is provided, the sublists will be used as separate channels (unless `compute_errors` is True).
         out_path (str): The path to the output .npy file where the aggregated data will be saved.
         scan_type (str): The type of scan, either "FF" or "HF".
+        compute_errors (bool): If True, will compute the absolute error between the reconstructions and the ground truth.
+            The `paths` should contain 2 lists: one for the reconstructions and one for the ground truth.
     """
     if not paths:
         logger.warning("No paths provided to aggregate_saved_recons. Nothing to do.")
         return
     
+    # If paths has sublists, verify they have the same length
     if isinstance(paths[0], list):
-        channels = len(paths)
-        logger.debug(f"Received a list of lists for paths, aggregating across {channels} channels.")
-    else:
+        if not all(len(p) == len(paths[0]) for p in paths):
+            raise ValueError("All sublists in paths must have the same length.")
+        
+    if compute_errors:
+        if len(paths) != 2:
+            raise ValueError("When compute_errors is True, paths must contain exactly two lists: one for reconstructions and one for ground truth.")
+        
+        logger.debug("Computing errors between reconstructions and ground truth.")
         channels = 1
-        paths = [paths]
+    else:
+        if isinstance(paths[0], list):
+            channels = len(paths)
+            logger.debug(f"Received a list of lists for paths, aggregating across {channels} channels.")
+        else:
+            channels = 1
+            paths = [paths]
 
     # 1. Determine the shape of the final aggregated array without loading all data
-    first_recon = torch.load(paths[0]).detach().float()
+    first_recon = torch.load(paths[0][0]).detach().float()
     first_recon = normalizeInputsClip(first_recon, scan_type)
     first_recon = torch.unsqueeze(first_recon, 1)
     
@@ -60,17 +74,38 @@ def aggregate_saved_recons(paths: list[str] | list[list[str]], out_path: str, sc
     # 3. Fill the memory-mapped array slice by slice
     # This keeps RAM usage low, as we only load one reconstruction at a time.
     for i, paths_ in tqdm(enumerate(zip(*paths)), total=len(paths[0]), desc="Aggregating reconstructions to disk"):
-        for j, path in enumerate(paths_):
-            recon = torch.load(path).detach().float()
+        if compute_errors:
+            recon_path, gt_path = paths_
+            recon = torch.load(recon_path).detach().float()
+            gt = torch.load(gt_path).detach().float()
+
             recon = normalizeInputsClip(recon, scan_type)
+            gt = normalizeInputsClip(gt, scan_type)
+
             recon = torch.unsqueeze(recon, 1)
+            gt = torch.unsqueeze(gt, 1)
+
+            # Compute absolute error
+            error = torch.abs(recon - gt)
 
             start_idx = i * num_slices_per_recon
             end_idx = (i + 1) * num_slices_per_recon
 
-            recon_agg_memmap[start_idx:end_idx, j, ...] = recon.numpy()
-        
-        del recon
+            recon_agg_memmap[start_idx:end_idx, 0, ...] = error.numpy()
+
+            del recon, gt, error
+        else:
+            for j, path in enumerate(paths_):
+                recon = torch.load(path).detach().float()
+                recon = normalizeInputsClip(recon, scan_type)
+                recon = torch.unsqueeze(recon, 1)
+
+                start_idx = i * num_slices_per_recon
+                end_idx = (i + 1) * num_slices_per_recon
+
+                recon_agg_memmap[start_idx:end_idx, j, ...] = recon.numpy()
+            
+                del recon
 
     # Ensure all data is written to disk
     recon_agg_memmap.flush()

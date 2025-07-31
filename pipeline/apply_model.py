@@ -234,7 +234,7 @@ def apply_model_to_projections(
 
 def apply_model_to_recons(
     model: torch.nn.Module,
-    pt_path: str,
+    pt_path: str | list[str],
     device: torch.device,
     scan_type: str,
     train_at_inference: bool = False, # for MC dropout
@@ -242,13 +242,37 @@ def apply_model_to_recons(
 ):
     """
     Apply CNN model slice-wise to nonstop-gated reconstructions.
-    Handles both standard (single-tensor output) and evidential (four-tensor output) models.
+    Handles standard (single-tensor input, single-tensor output) and evidential (single-tensor input, four-tensor output) models,
+    and error-based auxiliary models (three-tensor input, one-tensor output).
     """
-    # Load the nonstop-gated reconstruction
-    # NOTE: These each have shape (160, 512, 512) for HF and shape (160, 256, 256) for FF
-    recon = torch.load(pt_path).detach().to(device)
-    recon = normalizeInputsClip(recon, scan_type)
-    recon = torch.unsqueeze(recon, 1)  # Add channel dimension
+    error = False
+    if isinstance(pt_path, str):
+        # Load the nonstop-gated reconstruction
+        # NOTE: These each have shape (160, 512, 512) for HF and shape (160, 256, 256) for FF
+        recon = torch.load(pt_path).detach().to(device)
+        recon = normalizeInputsClip(recon, scan_type)
+        recon = torch.unsqueeze(recon, 1)  # Add channel dimension
+    elif isinstance(pt_path, list) and len(pt_path) == 3:
+        error = True
+
+        # Load nontop-gated, PD output, and ID output
+        nsg_recon = torch.load(pt_path[0]).detach().to(device)
+        pd_recon = torch.load(pt_path[1]).detach().to(device)
+        id_recon = torch.load(pt_path[2]).detach().to(device)
+
+        nsg_recon = normalizeInputsClip(nsg_recon, scan_type)
+        pd_recon = normalizeInputsClip(pd_recon, scan_type)
+        id_recon = normalizeInputsClip(id_recon, scan_type)
+
+        nsg_recon = torch.unsqueeze(nsg_recon, 1)
+        pd_recon = torch.unsqueeze(pd_recon, 1)
+        id_recon = torch.unsqueeze(id_recon, 1)
+
+        # Concatenate the three tensors along the channel dimension
+        recon = torch.cat((nsg_recon, pd_recon, id_recon), dim=1)
+        del nsg_recon, pd_recon, id_recon
+    else:
+        raise TypeError("pt_path must be a string or a list of three strings.")
 
     if train_at_inference:
         # Set the model to train mode for MC dropout
@@ -272,7 +296,7 @@ def apply_model_to_recons(
         alpha_out = torch.zeros_like(recon)
         beta_out = torch.zeros_like(recon)
     else:
-        # For standard models, we can modify the input tensor in place
+        # For standard/error models, we can modify the input tensor in place
         pass
 
     # Loop over the outputted slices in batches of _batch_size
@@ -288,10 +312,16 @@ def apply_model_to_recons(
                 nu_out[indices] = nu
                 alpha_out[indices] = alpha
                 beta_out[indices] = beta
+            elif error:
+                recon[indices, 0] = output[:, 0] # replace the first channel with the output
             else:
                 recon[indices] = output # replace the slices in place
 
     if is_evidential:
         return gamma_out, nu_out, alpha_out, beta_out
+    elif error:
+        recon_ = recon[:, [0]].clone()
+        del recon
+        return recon_
     else:
         return recon

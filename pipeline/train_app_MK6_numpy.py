@@ -345,8 +345,8 @@ def init_dataloader(config: dict, files: Files, sample: str, input_type: str, do
         images_path = files.get_projections_aggregate_filepath(sample, gated=False)
         truth_images_path = files.get_projections_aggregate_filepath(sample, gated=True)
     else:
-        images_path = files.get_images_aggregate_filepath(input_type, sample, truth=False, error=error)
-        truth_images_path = files.get_images_aggregate_filepath('fdk', sample, truth=True, error=error) # always use FDK for ground truth
+        images_path = files.get_images_aggregate_filepath(input_type['ID'][0] if error else input_type, sample, truth=False, error=error)
+        truth_images_path = files.get_images_aggregate_filepath(input_type['ID'][0] if error else 'fdk', sample, truth=True, error=error)
     logger.debug(f"{sample} images path: {images_path}")
     logger.debug(f"{sample} ground truth images path: {truth_images_path}")
 
@@ -470,8 +470,8 @@ class TrainingApp:
         if self.scans_agg_train is None:
             logger.debug("Using same dataset for all epochs...")
             # Get the dataloaders for training and validation
-            train_dl = init_dataloader(self.config, self.files, "TRAIN", self.config["input_type"], self.config['domain'], augment_on_fly=self.config['domain'] == 'IMAG', recon_len=160)
-            val_dl = init_dataloader(self.config, self.files, "VALIDATION", self.config["input_type"], self.config['domain'], augment_on_fly=self.config['domain'] == 'IMAG', recon_len=160)
+            train_dl = init_dataloader(self.config, self.files, "TRAIN", self.config["input_type"], self.config['domain'], augment_on_fly=self.config['domain'] == 'IMAG', recon_len=160, error=isinstance(self.config["input_type"], dict))
+            val_dl = init_dataloader(self.config, self.files, "VALIDATION", self.config["input_type"], self.config['domain'], augment_on_fly=self.config['domain'] == 'IMAG', recon_len=160, error=isinstance(self.config["input_type"], dict))
 
         # Initialize the tensorboard writers if enabled
         if self.config["tensor_board"]:

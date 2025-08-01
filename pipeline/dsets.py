@@ -272,7 +272,11 @@ class PairNumpySet(Dataset):
         self.tensor_1 = np.load(tensor_path_1, mmap_mode="r")
         self.tensor_2 = np.load(tensor_path_2, mmap_mode="r")
         if self.tensor_1.shape != self.tensor_2.shape:
-            raise ValueError("Tensors must have the same shape.")
+            # Check if the only difference is the tensor_1 channels being 3 and tensor_2 being 1
+            if self.tensor_1.shape[1] == 3 and self.tensor_2.shape[1] == 1 and self.tensor_1.shape[2:] == self.tensor_2.shape[2:] and self.tensor_1.shape[0] == self.tensor_2.shape[0]:
+                pass
+            else:
+                raise ValueError("Tensors must have the same shape.")
         factor = 3 if augment_on_fly else 1
         self.length = self.tensor_1.shape[0] * factor  # Number of samples
         self.device = device

@@ -34,8 +34,8 @@ def normalizeInputsClip(input_images, scan_type):
     # normalize input to [0, 1]
     input_images *= 25.0
 
-    if scan_type == "FF":
-        input_images = input_images[:, 128:-128, 128:-128]
+    if scan_type == "FF" and input_images.shape[1] == 512:
+        input_images = input_images[:, 128:-128, 128:-128].clone()
 
     return input_images
 

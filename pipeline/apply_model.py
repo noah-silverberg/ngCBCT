@@ -4,6 +4,7 @@ from pipeline import network_instance
 import logging
 from pipeline.dsets import normalizeInputsClip
 from pipeline.proj import divide_sinogram
+from typing import Union
 
 logger = logging.getLogger("pipeline")
 
@@ -234,7 +235,7 @@ def apply_model_to_projections(
 
 def apply_model_to_recons(
     model: torch.nn.Module,
-    pt_path: str | list[str],
+    pt_path: Union[str, list[str]],
     device: torch.device,
     scan_type: str,
     train_at_inference: bool = False, # for MC dropout
@@ -262,11 +263,9 @@ def apply_model_to_recons(
 
         nsg_recon = normalizeInputsClip(nsg_recon, scan_type)
         pd_recon = normalizeInputsClip(pd_recon, scan_type)
-        id_recon = normalizeInputsClip(id_recon, scan_type)
 
         nsg_recon = torch.unsqueeze(nsg_recon, 1)
         pd_recon = torch.unsqueeze(pd_recon, 1)
-        id_recon = torch.unsqueeze(id_recon, 1)
 
         # Concatenate the three tensors along the channel dimension
         recon = torch.cat((nsg_recon, pd_recon, id_recon), dim=1)

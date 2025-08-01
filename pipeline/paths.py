@@ -23,13 +23,17 @@ class Directories:
         images_aggregate_dir (str): Absolute path to the directory containing aggregated ID data files.
         images_model_dir (str): Absolute path to the directory containing ID model files.
         images_results_dir (str): Absolute path to the directory containing ID results files.
+        error_maps_dir (str): Absolute path to the directory containing ID absolute error map files.
+        error_results_dir (str): Absolute path to the directory containing results files for auxiliary error-predicting models.
 
     Methods:
         get_model_dir(model_version, domain, ensure_exists=True): Get the directory path for the model of a specific version.
-        get_projections_results_dir(model_version, ensure_exists=True): Get the directory path for the projection results of a specific PD model version.
-        get_reconstructions_dir(model_version, ensure_exists=True): Get the directory path for the reconstructions of a specific PD model version.
+        get_projections_results_dir(model_version, passthrough_num, ensure_exists=True): Get the directory path for the projection results of a specific PD model version.
+        get_reconstructions_dir(model_version, passthrough_num, ensure_exists=True): Get the directory path for the reconstructions of a specific PD model version.
         get_images_aggregate_dir(model_version, ensure_exists=True): Get the directory path for the aggregated images of a specific PD model version (after FDK).
-        get_images_results_dir(model_version, ensure_exists=True): Get the directory path for the images results of a specific PD model version (after FDK).
+        get_images_results_dir(model_version, passthrough_num, ensure_exists=True): Get the directory path for the images results of a specific ID model version.
+        get_error_map_dir(model_version, passthrough_num, ensure_exists=True): Get the directory path for the absolute error results of a specific ID model version.
+        get_error_results_dir(model_version, passthrough_num, ensure_exists=True): Get the directory path for the results of an auxiliary error-predicting model.
 
     Note:
         All paths must be absolute paths.
@@ -48,6 +52,8 @@ class Directories:
     images_aggregate_dir: str = None
     images_model_dir: str = None
     images_results_dir: str = None
+    error_maps_dir: str = None
+    error_results_dir: str = None
 
     def __post_init__(self):
         for field in self.__dataclass_fields__:
@@ -138,6 +144,34 @@ class Directories:
             ensure_dir(dir_path)
 
         return dir_path
+    
+    def get_error_map_dir(self, model_version, passthrough_num, ensure_exists=True):
+        """
+        Get the directory path for the absolute error results of a specific ID model version.
+        """
+        dir_path = os.path.join(self.error_maps_dir, model_version)
+
+        if passthrough_num is not None:
+            dir_path = os.path.join(dir_path, f"passthrough_{passthrough_num:02d}")
+
+        if ensure_exists:
+            ensure_dir(dir_path)
+
+        return dir_path
+    
+    def get_error_results_dir(self, model_version, passthrough_num, ensure_exists=True):
+        """
+        Get the directory path for the results of an auxiliary error-predicting model.
+        """
+        dir_path = os.path.join(self.error_results_dir, model_version)
+
+        if passthrough_num is not None:
+            dir_path = os.path.join(dir_path, f"passthrough_{passthrough_num:02d}")
+
+        if ensure_exists:
+            ensure_dir(dir_path)
+
+        return dir_path
 
 
 class Files:
@@ -156,6 +190,7 @@ class Files:
         get_recon_filepath(model_version, patient, scan, scan_type, gated, ensure_exists): Get the absolute file path for the FDK reconstruction `.pt` file.
         get_images_aggregate_filepath(model_version, split, gated, ensure_exists): Get the absolute file path for the aggregated images `.npy` file.
         get_images_results_filepath(model_version, patient, scan, ensure_exists): Get the absolute file path for the image results `.pt` file.
+        get_error_results_filepath(model_version, patient, scan, ensure_exists): Get the absolute file path for the error prediction results `.pt` file.
     """
     def __init__(self, directories: Directories):
         self.directories = directories
@@ -488,29 +523,42 @@ class Files:
         return os.path.join(dir_, filename)
     
     @staticmethod
-    def _get_images_aggregate_filename(split, gated):
+    def _get_images_aggregate_filename(split, truth, error):
         """
-        Get the filename for the aggregated images `.npy` file based on data split and gating.
+        Get the filename for the aggregated images `.npy` file based on data split, truthiness,
+        and whether it is for an error-based model.
 
         Args:
             split (str): Data split, e.g. 'train', 'val', 'test'.
-            gated (bool): Whether the data is gated or nonstop-gated.
+            truth (bool): Whether the data is the ground truth or not.
+            error (bool): Whether the data is for an error-based model.
 
         Returns:
             str: Filename for the aggregated images `.npy` file.
         """
-        gated_str = "gated" if gated else "ng"
-        split = split.lower()
-        return f"{gated_str}_{split}.npy" # e.g., gated_train.npy
+        if truth:
+            if not error:
+                prefix = "gated" # For normal, ground truth = gated
+            else:
+                prefix = "truth_error" # For error-based, GT = absolute errors
+        else:
+            if not error:
+                prefix = "ng" # For normal, !GT = !gated
+            else:
+                prefix = "three_channel" # For error-based, !GT = three channels (pre-PD, post-PD, and post-ID)
 
-    def get_images_aggregate_filepath(self, model_version, split, gated, ensure_exists=True):
+        split = split.lower()
+        return f"{prefix}_{split}.npy" # e.g., gated_train.npy
+
+    def get_images_aggregate_filepath(self, model_version, split, truth, error=False, ensure_exists=True):
         """
         Get the absolute file path for the aggregated images `.npy` file.
 
         Args:
             model_version (str): PD model version identifier, e.g. 'v1', 'v2'.
             split (str): Data split, e.g. 'train', 'val', 'test'.
-            gated (bool): Whether the data is gated or nonstop-gated.
+            truth (bool): Whether the data is the ground truth or not.
+            error (bool, optional): Whether the data is for an error-based model.
             ensure_exists (bool, optional): Whether to ensure the directory exists.
 
         Returns:
@@ -520,9 +568,9 @@ class Files:
             If using a reconstructions not from a PD model (e.g., FDK or PL),
             you can just pass that identifier instead (e.g., 'fdk' or 'pl').
         """
-        if gated and model_version != "fdk":
+        if truth and not error and model_version != "fdk":
             raise ValueError("Gated images should be called with model_version='fdk'.")
-        filename = self._get_images_aggregate_filename(split, gated)
+        filename = self._get_images_aggregate_filename(split, truth, error)
         dir_ = self.directories.get_images_aggregate_dir(model_version, ensure_exists)
         return os.path.join(dir_, filename)
 
@@ -556,4 +604,68 @@ class Files:
         """
         filename = self._get_images_results_filename(patient, scan)
         dir_ = self.directories.get_images_results_dir(model_version, passthrough_num, ensure_exists)
+        return os.path.join(dir_, filename)
+
+    @staticmethod
+    def _get_error_map_filename(patient, scan):
+        """
+        Get the filename for the absolute error map results `.pt` file based on patient and scan.
+
+        Args:
+            patient (str): Patient identifier, e.g. '01'.
+            scan (str): Scan identifier, e.g. '01'.
+
+        Returns:
+            str: Filename for the absolute error map results `.pt` file.
+        """
+        return f"p{patient}_{scan}_error.pt"
+
+    def get_error_map_filepath(self, model_version, patient, scan, passthrough_num=None, ensure_exists=True):
+        """
+        Get the absolute file path for the absolute error map results `.pt` file.
+
+        Args:
+            model_version (str): Model version identifier, e.g. 'v1', 'v2'.
+            patient (str): Patient identifier, e.g. '01'.
+            scan (str): Scan identifier, e.g. '01'.
+            passthrough_num (int, optional): The passthrough number (leave as None for deterministic).
+            ensure_exists (bool, optional): Whether to ensure the directory exists.
+
+        Returns:
+            str: Absolute file path for the absolute error map results `.pt` file.
+        """
+        filename = self._get_error_map_filename(patient, scan)
+        dir_ = self.directories.get_error_map_dir(model_version, passthrough_num, ensure_exists)
+        return os.path.join(dir_, filename)
+    
+    @staticmethod
+    def _get_error_results_filename(patient, scan):
+        """
+        Get the filename for the error prediction results `.pt` file based on patient and scan.
+
+        Args:
+            patient (str): Patient identifier, e.g. '01'.
+            scan (str): Scan identifier, e.g. '01'.
+
+        Returns:
+            str: Filename for the error prediction results `.pt` file.
+        """
+        return f"p{patient}_{scan}_error.pt"
+    
+    def get_error_results_filepath(self, model_version, patient, scan, passthrough_num=None, ensure_exists=True):
+        """
+        Get the absolute file path for the error prediction results `.pt` file.
+
+        Args:
+            model_version (str): Model version identifier, e.g. 'v1', 'v2'.
+            patient (str): Patient identifier, e.g. '01'.
+            scan (str): Scan identifier, e.g. '01'.
+            passthrough_num (int, optional): The passthrough number (leave as None for deterministic).
+            ensure_exists (bool, optional): Whether to ensure the directory exists.
+
+        Returns:
+            str: Absolute file path for the error prediction results `.pt` file.
+        """
+        filename = self._get_error_results_filename(patient, scan)
+        dir_ = self.directories.get_error_results_dir(model_version, passthrough_num, ensure_exists)
         return os.path.join(dir_, filename)

@@ -5,11 +5,12 @@ from tqdm import tqdm
 from pipeline.dsets import normalizeInputsClip
 import numpy as np
 from numpy.lib.format import open_memmap
+from typing import Union
 
 logger = logging.getLogger("pipeline")
 
 
-def aggregate_saved_recons(paths: list[str] | list[list[str]], out_path: str, scan_type: str, compute_errors: bool = False):
+def aggregate_saved_recons(paths: Union[list[str], list[list[str]]], out_path: str, scan_type: str, compute_errors: bool = False):
     """
     Load per-scan reconstruction tensors, concatenate across scans, and save aggregates
     directly to a memory-mapped file to avoid high RAM usage.
@@ -47,12 +48,13 @@ def aggregate_saved_recons(paths: list[str] | list[list[str]], out_path: str, sc
 
     # 1. Determine the shape of the final aggregated array without loading all data
     first_recon = torch.load(paths[0][0]).detach().float()
-    first_recon = normalizeInputsClip(first_recon, scan_type)
-    first_recon = torch.unsqueeze(first_recon, 1)
+    if first_recon.ndim == 3:
+        first_recon = normalizeInputsClip(first_recon, scan_type)
+        first_recon = torch.unsqueeze(first_recon, 1)
     
     recon_shape = first_recon.shape
-    num_slices_per_recon = recon_shape[0]
-    num_recons = len(paths)
+    num_slices_per_recon = 160
+    num_recons = len(paths[0])
 
     if recon_shape[1] != 1:
         raise ValueError("Reconstruction tensors must have a single channel (shape should be [num_slices, 1, height, width]).")
@@ -79,31 +81,34 @@ def aggregate_saved_recons(paths: list[str] | list[list[str]], out_path: str, sc
             recon = torch.load(recon_path).detach().float()
             gt = torch.load(gt_path).detach().float()
 
-            recon = normalizeInputsClip(recon, scan_type)
+            if recon.shape[0] == 200:
+                recon = normalizeInputsClip(recon, scan_type)
             gt = normalizeInputsClip(gt, scan_type)
 
-            recon = torch.unsqueeze(recon, 1)
-            gt = torch.unsqueeze(gt, 1)
+            if recon.ndim == 4:
+                recon = torch.squeeze(recon, 1)
 
             # Compute absolute error
-            error = torch.abs(recon - gt)
+            error = torch.abs(recon.cpu() - gt.cpu())
 
             start_idx = i * num_slices_per_recon
             end_idx = (i + 1) * num_slices_per_recon
 
-            recon_agg_memmap[start_idx:end_idx, 0, ...] = error.numpy()
+            recon_agg_memmap[start_idx:end_idx, 0, ...] = error.cpu().numpy()
 
             del recon, gt, error
         else:
             for j, path in enumerate(paths_):
                 recon = torch.load(path).detach().float()
-                recon = normalizeInputsClip(recon, scan_type)
-                recon = torch.unsqueeze(recon, 1)
+                if recon.shape[0] == 200:
+                    recon = normalizeInputsClip(recon, scan_type)
+                if recon.ndim == 4:
+                    recon = torch.squeeze(recon, 1)
 
                 start_idx = i * num_slices_per_recon
                 end_idx = (i + 1) * num_slices_per_recon
 
-                recon_agg_memmap[start_idx:end_idx, j, ...] = recon.numpy()
+                recon_agg_memmap[start_idx:end_idx, j, ...] = recon.cpu().numpy()
             
                 del recon
 

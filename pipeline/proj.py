@@ -3,6 +3,7 @@ import torch
 import mat73
 import torch.nn as nn
 from pipeline.paths import Files
+import scipy.io as sio
 
 
 def load_projection_mat(
@@ -20,13 +21,18 @@ def load_projection_mat(
         angles (torch.Tensor): shape (A,), gated projection angles.
         prj (torch.Tensor): shape (W, H, A), gated projection data.
     """
-    # Load projection mat file for a given scan
-    if exclude_prj:
-        mat = mat73.loadmat(mat_path, only_include=["odd_index", "angles"])
-    else:
-        mat = mat73.loadmat(mat_path)
+    try:
+        # Load projection mat file for a given scan
+        if exclude_prj:
+            mat = mat73.loadmat(mat_path, only_include=["odd_index", "angles"])
+        else:
+            mat = mat73.loadmat(mat_path)
+    except TypeError:
+        if exclude_prj:
+            raise ValueError(f"exclude_prj=True is not supported for scipy.io.loadmat")
+        mat = sio.loadmat(mat_path)
 
-    odd_index = np.array(mat["odd_index"])  # angle indices to keep for nonstop gated
+    odd_index = np.array(mat["odd_index"]).flatten()  # angle indices to keep for nonstop gated
     angles = torch.from_numpy(np.array(mat["angles"]).flatten()).float()  # angles acquired
     if exclude_prj:
         return odd_index, angles

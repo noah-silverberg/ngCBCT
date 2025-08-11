@@ -77,6 +77,24 @@ def find_missing_indices(odd_index: np.ndarray):
     missing = sorted(full_range - present)
     return missing
 
+def undersample_projections(prj_gcbct: torch.Tensor, odd_index: np.ndarray):
+    """
+    Undersample projections to simulate nonstop-gated scan.
+
+    Args:
+        prj_gcbct (torch.Tensor): shape (A, H, W), gated sinogram.
+        odd_index (np.ndarray): shape (K,), 1-based indices of acquired angles.
+
+    Returns:
+        prj_ngcbct (torch.Tensor): shape (K, H, W), gated sinogram with only acquired angles.
+        ngcbct_idx (np.ndarray): shape (K,), 0-based indices of acquired angles.
+    """
+    # Convert odd_index to zero-based
+    ngcbct_idx = odd_index.astype(np.int64) - 1
+    prj_ngcbct = torch.zeros_like(prj_gcbct)
+    prj_ngcbct[ngcbct_idx] = prj_gcbct[ngcbct_idx]
+    return prj_ngcbct, ngcbct_idx
+
 
 def interpolate_projections(prj_gcbct: torch.Tensor, odd_index: np.ndarray):
     """
@@ -94,14 +112,10 @@ def interpolate_projections(prj_gcbct: torch.Tensor, odd_index: np.ndarray):
     #       it also is not optimized for speed
     #       but this is not a bottleneck in the pipeline so we don't worry about it
 
-    # Convert odd_index to zero-based
-    ngcbct_idx = odd_index.astype(np.int64) - 1
     num_angles = prj_gcbct.shape[0]
 
     # Initialize a new tensor for nonstop-gated, and fill it with the acquired angles
-    prj_ngcbct = torch.zeros_like(prj_gcbct)
-    prj_ngcbct[ngcbct_idx] = prj_gcbct[ngcbct_idx]
-
+    prj_ngcbct, ngcbct_idx = undersample_projections(prj_gcbct, odd_index)
     tmp = prj_ngcbct.detach().clone().permute(1, 0, 2)  # [H, angles, W]
 
     # Get the indices of the unacquired angles in nonstop-gated

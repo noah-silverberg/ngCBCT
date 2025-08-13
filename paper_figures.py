@@ -1,236 +1,388 @@
 #!/usr/bin/env python3
+"""
+Refactored script for generating 3D reconstruction comparison figures.
+
+This script is designed to be highly configurable. The user should only need
+to modify the 'USER CONFIGURATION' section to define which scans to plot,
+which reconstruction methods to compare, and how to load the corresponding
+data.
+"""
 import os
-import glob
-from scipy.io import loadmat
+import re
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+from typing import List, Dict, Tuple, Callable, Union
+from pipeline.paths import Directories, Files
+from pipeline.utils import read_scans_agg_file
 
-# -----------------------------------------------------------------------------
-# CONFIG
-# -----------------------------------------------------------------------------
-BASE_DIR = "Data/3D_recon"
-OUTPUT_DIR = "."
-RUN = "1"
+# =============================================================================
+# -------------------------- USER CONFIGURATION -------------------------------
+# =============================================================================
 
-# the three scans to plot
-SCANS = [
-    # ("HF", "20", "01"),
-    # ("HF", "14", "01"),
-    # ("FF", "22", "01"),
-    ("FF", "18", "01"),
+# --- General Paths ---
+# Directory where the output figures (PNG, PDF) will be saved.
+OUTPUT_DIR = "UQ_reconstruction_comparisons_PAPER"
+
+# --- Scan Selection ---
+# How to select scans to plot. Two modes are available:
+# 1. 'direct': Manually list the scans in the `DIRECT_SCANS_TO_PLOT` list.
+# 2. 'agg_file': Provide a path to a scan aggregation file. The script will
+#    plot all scans from the TEST section.
+SCAN_SELECTION_MODE = 'direct'  # Options: 'direct', 'agg_file'
+
+# Used if SCAN_SELECTION_MODE is 'direct'.
+# List of tuples, where each tuple is (scan_type, patient_id, scan_id).
+DIRECT_SCANS_TO_PLOT = [
+    # ("FF", "26", "01"),
+    # ("FF", "28", "03"),
+    # ("FF", "29", "01"),
+    # ("HF", "25", "03"),
+    # ("HF", "27", "01"),
+    ("HF", "29", "01"),
 ]
 
-# the crops for each scan (y0, y1, x0, x1)
-CROPS = {
-    ("HF", "20", "01"): {
-        "index": (70, 512 - 160, 75, 512 - 35),
-        "width": (0, 160 - 0, 60, 512 - 170),
-        "height": (0, 160 - 0, 70, 512 - 45),
-    },
-    ("HF", "14", "01"): {
-        "index": (95, 512 - 190, 110, 512 - 105),
-        "width": (0, 160 - 0, 80, 512 - 190),
-        "height": (0, 160 - 0, 85, 512 - 95),
-    },
-    ("FF", "22", "01"): {
-        "index": (5, 256 - 45, 0, 256 - 0),
-        "width": (0, 160 - 0, 15, 256 - 53),
-        "height": (0, 160 - 0, 8, 256 - 9),
-    },
-    ("FF", "18", "01"): {
-        "index": (5, 256 - 55, 0, 256 - 0),
-        "width": (0, 160 - 0, 15, 256 - 53),
-        "height": (0, 160 - 0, 35, 256 - 9),
-    },
+# Used if SCAN_SELECTION_MODE is 'agg_file'.
+# Path to a text file listing scans (see `_read_scans_agg_file` for format).
+AGG_FILE_PATH = "scans_to_agg_FF.txt"
+
+# --- Tumor Location Data ---
+# Paths to the .pt files containing tumor locations for HF and FF scans.
+# These files should contain a tensor where `tensor[pid, sid]` gives the
+# tumor location as a (z, y, x) coordinate tuple.
+TUMOR_LOC_PATHS = {
+    "HF": "H:/Public/Noah/tumor_location_NEW.pt",
+    "FF": "H:/Public/Noah/tumor_location_FF_NEW.pt",
 }
 
-SUBPLOTS = {
-    ("HF", "20", "01"): {
-        "top": 0.85,
-        "hspace": 0.05,
-        "height_factor": 3.7,
-    },
-    ("HF", "14", "01"): {
-        "top": 0.88,
-        "hspace": 0.01,
-        "height_factor": 3.5,
-    },
-    ("FF", "22", "01"): {
-        "top": 0.88,
-        "hspace": 0.05,
-        "height_factor": 3.4,
-    },
-    ("FF", "18", "01"): {
-        "top": 0.88,
-        "hspace": 0.01,
-        "height_factor": 3.5,
-    },
-}
+# --- Method & Data Loader Definitions ---
+# Define the reconstruction methods to plot. Each method is a dictionary with:
+#  - 'name': A string for the plot title (e.g., 'FDK', 'IResNet').
+#  - 'loader': A function that takes (scan_type, pid, sid) and returns the
+#              reconstruction volume as a NumPy array.
+#
+# IMPORTANT:
+#  - The first method in the list is always treated as the ground truth
+#    (Gated CBCT) and will have a dashed box drawn around it.
+#  - Loader functions MUST return NumPy arrays with dimensions:
+#      - (160, 512, 512) for 'HF' scans (z, y, x)
+#      - (160, 256, 256) for 'FF' scans (z, y, x)
+#  - The script assumes the loaded data is already normalized for display.
+#  - You MUST implement the loader functions in the section below.
 
-# per‐scan, per‐view arrow customization:
-# keys are (scan_type, pid, sid), values are dicts mapping view→params
-# params:
-#   tail_dx, tail_dy : shifts in pixels from tumor to arrow tail
-#   lw               : line width of arrow
-#   tip_dx, tip_dy   : additional x/y translation of the head (if desired)
-ARROW_PARAMS = {
-    ("HF", "20", "01"): {
-        "index": {"tail_dx": 50, "tail_dy": -50, "tip_dx": 7, "tip_dy": -7, "lw": 3},
-        "width": {"tail_dx": 35, "tail_dy": -40, "tip_dx": 4, "tip_dy": -4, "lw": 3},
-        "height": {"tail_dx": 35, "tail_dy": -45, "tip_dx": 3, "tip_dy": -3, "lw": 3},
-    },
-    ("HF", "14", "01"): {
-        "index": {"tail_dx": 45, "tail_dy": -60, "tip_dx": 15, "tip_dy": -22, "lw": 3},
-        "width": {"tail_dx": 30, "tail_dy": -56, "tip_dx": 10, "tip_dy": -30, "lw": 3},
-        "height": {"tail_dx": 48, "tail_dy": -52, "tip_dx": 18, "tip_dy": -17, "lw": 3},
-    },
-    ("FF", "22", "01"): {
-        "index": {"tail_dx": -32, "tail_dy": -30, "tip_dx": -7, "tip_dy": -2, "lw": 3},
-        "width": {"tail_dx": -25, "tail_dy": -29, "tip_dx": -2, "tip_dy": -7, "lw": 3},
-        "height": {
-            "tail_dx": -30,
-            "tail_dy": -34,
-            "tip_dx": -5,
-            "tip_dy": -10,
-            "lw": 3,
-        },
-    },
-    ("FF", "18", "01"): {
-        "index": {"tail_dx": -40, "tail_dy": -53, "tip_dx": -12, "tip_dy": -22, "lw": 3},
-        "width": {"tail_dx": -28, "tail_dy": -47, "tip_dx": -5, "tip_dy": -18, "lw": 3},
-        "height": {
-            "tail_dx": -30,
-            "tail_dy": -40,
-            "tip_dx": -5,
-            "tip_dy": -10,
-            "lw": 3,
-        },
-    },
-}
+# Placeholder function type hint
+LoaderFunc = Callable[[str, str, str], np.ndarray]
 
-VIEWS = ["index", "width", "height"]
-METHODS = [
-    ("u_FDK", "FDK"),
-    ("u_PL", "IR"),
-    ("FBPCONVNet", "FBPCONVNet"),
-    ("IResNet", "IResNet"),
-    ("DDCNN", "DDCNN"),
-]
+HF_DIRECTORIES = Directories(
+    reconstructions_dir=os.path.join('H:\Public/Noah/phase7/DS13', "reconstructions"),
+    reconstructions_gated_dir=os.path.join("H:\Public/Noah", "gated", "fdk_recon"),
+    images_results_dir=os.path.join('H:\Public/Noah/phase7/DS13', "results", "images"),
+)
+HF_FILES = Files(HF_DIRECTORIES)
+FF_DIRECTORIES = Directories(
+    reconstructions_dir=os.path.join('H:\Public/Noah/phase7/DS14', "reconstructions"),
+    reconstructions_gated_dir=os.path.join("H:\Public/Noah", "gated", "fdk_recon"),
+    images_results_dir=os.path.join('H:\Public/Noah/phase7/DS14', "results", "images"),
+)
+FF_FILES = Files(FF_DIRECTORIES)
 
-
-def load_gt_and_recons(scan_type, pid, sid):
-    """Load GT, FDK, IR, DDCNN, FBPCONVNet, IResNet volumes for a given scan."""
-    mat_dir = os.path.join(BASE_DIR, scan_type)
-    # GT filename
-    if scan_type == "FF":
-        gt_pattern = f"recon_p{pid}.{scan_type}{sid}.u_FDK_ROI_fullView.mat"
+def load_gated_cbct(scan_type: str, pid: str, sid: str) -> np.ndarray:
+    """USER-DEFINED: Loads the ground truth Gated CBCT volume."""
+    # --- Example Implementation ---
+    # print(f"Loading Gated CBCT for {scan_type} p{pid}_{sid}...")
+    # if scan_type == 'HF':
+    #     return np.random.rand(160, 512, 512)
+    # else: # FF
+    #     return np.random.rand(160, 256, 256)
+    # --------------------------
+    if scan_type == 'HF':
+        path = HF_FILES.get_recon_filepath('fdk', pid, sid, 'HF', gated=True)
+        recon = torch.load(path, map_location='cpu')
+        recon = recon[20:-20].clone()
     else:
-        gt_pattern = f"recon_p{pid}.{scan_type}{sid}.u_FDK_full.mat"
-    gt_path = glob.glob(os.path.join(mat_dir, gt_pattern))[0]
-    gt_mat = loadmat(gt_path)
-    # pick GT key
-    gt_key = "u_FDK_ROI_fullView" if scan_type == "FF" else "u_FDK_full"
-    gt_vol = gt_mat[gt_key][..., 20:-20]
-    if scan_type == "FF":
-        # crop 256×256
-        gt_vol = gt_vol[128:-128, 128:-128]
-    # FDK
-    fdk_key = "u_FDK_ROI" if scan_type == "FF" else "u_FDK"
-    fdk_path = (
-        gt_path.replace("FDK_ROI_fullView", "FDK_ROI")
-        if scan_type == "FF"
-        else gt_path.replace("FDK_full", "FDK")
-    )
-    fdk = loadmat(fdk_path)[fdk_key][..., 20:-20]
-    if scan_type == "FF":
-        fdk = fdk[128:-128, 128:-128]
-    # IR (PL)
-    pl_key = "u_PL_ROI" if scan_type == "FF" else "u_PL"
-    pl_pat = "PL_ROI.b1" if scan_type == "FF" else "PL.b1.iter200"
-    pl_path = (
-        gt_path.replace("FDK_ROI_fullView", pl_pat)
-        if scan_type == "FF"
-        else gt_path.replace("FDK_full", pl_pat)
-    )
-    pl = loadmat(pl_path)[pl_key][..., 20:-20]
-    if scan_type == "FF":
-        pl = pl[128:-128, 128:-128]
+        path = FF_FILES.get_recon_filepath('fdk', pid, sid, 'FF', gated=True)
+        recon = torch.load(path, map_location='cpu')
+        recon = recon[20:-20].clone()
+        if recon.shape[-2:] == (512, 512):
+            recon = recon[:, 128:-128, 128:-128].clone()
 
-    # clip and normalize GT, FDK, PL
-    for v in [gt_vol, fdk, pl]:
-        np.clip(v, 0, 0.04, out=v)
-        v -= v.min()
-        v /= v.max()
+    recon = torch.clip(recon, 0.0, 0.04) * 25.0  # Normalize to [0, 1] range
+    return recon.numpy()
 
-    # DDCNN
-    ds = 14 if scan_type == "FF" else 13
-    dd_path = os.path.join(
-        mat_dir, f"p{pid}.{scan_type}{sid}_IResNet_MK6_DS{ds}.2_run{RUN}_3D.pt"
-    )
-    ddcnn = torch.load(dd_path, weights_only=False)
-    # FBPCONVNet
-    fbp_glob = glob.glob(
-        os.path.join(mat_dir, f"p{pid}.{scan_type}{sid}_FBPCONVNet*_3D.pt")
-    )
-    fbpcnn = torch.load(fbp_glob[0], weights_only=False)
-    # IResNet
-    ire_glob = glob.glob(
-        os.path.join(mat_dir, f"p{pid}.{scan_type}{sid}_IResNet*PL_3D.pt")
-    )
-    ire = torch.load(ire_glob[0], weights_only=False)
-    # tumor loc
-    tlocs = torch.load(
-        os.path.join(
-            BASE_DIR,
-            "tumor_location_FF.pt" if scan_type == "FF" else "tumor_location.pt",
-        ),
-        weights_only=False,
-    )
-    t = tlocs[int(pid), int(sid)]
-    if scan_type == "FF":
-        t[:2] -= 128
-    t[2] -= 20
-    return gt_vol, fdk, pl, ddcnn, fbpcnn, ire, t
+def load_fdk(scan_type: str, pid: str, sid: str) -> np.ndarray:
+    if scan_type == 'HF':
+        path = HF_FILES.get_recon_filepath('raw', pid, sid, 'HF', gated=False)
+        recon = torch.load(path, map_location='cpu')
+        recon = recon[20:-20].clone()
+    else:
+        path = FF_FILES.get_recon_filepath('raw', pid, sid, 'FF', gated=False)
+        recon = torch.load(path, map_location='cpu')
+        recon = recon[20:-20].clone()
+        if recon.shape[-2:] == (512, 512):
+            recon = recon[..., 128:-128, 128:-128].clone()
+
+    recon = torch.clip(recon, 0.0, 0.04) * 25.0  # Normalize to [0, 1] range
+
+    return recon.numpy()
+
+def load_ddcnn(scan_type: str, pid: str, sid: str) -> np.ndarray:
+    if scan_type == 'HF':
+        path = HF_FILES.get_images_results_filepath('MK7_01', pid, sid)
+        recon = torch.load(path, map_location='cpu')
+    else:
+        path = FF_FILES.get_images_results_filepath('MK7_01', pid, sid)
+        recon = torch.load(path, map_location='cpu')
+        if recon.shape[-2:] == (512, 512):
+            recon = recon[..., 128:-128, 128:-128].clone()
+
+    if recon.ndim == 4:
+        recon = torch.squeeze(recon, dim=1)
+
+    recon = torch.permute(recon, (0, 2, 1))
+    return recon.numpy()
+
+def load_mcdropout(scan_type: str, pid: str, sid: str) -> np.ndarray:
+    if scan_type == 'HF':
+        path = HF_FILES.get_images_results_filepath('MK7_MCDROPOUT_30_pct_NEW', pid, sid, passthrough_num=0)
+        recon = torch.load(path, map_location='cpu')
+    else:
+        path = FF_FILES.get_images_results_filepath('MK7_MCDROPOUT_15_pct', pid, sid, passthrough_num=0)
+        recon = torch.load(path, map_location='cpu')
+        if recon.shape[-2:] == (512, 512):
+            recon = recon[..., 128:-128, 128:-128].clone()
+
+    if recon.ndim == 4:
+        recon = torch.squeeze(recon, dim=1)
+    recon = torch.permute(recon, (0, 2, 1))
+    return recon.numpy()
+
+def load_bbb(scan_type: str, pid: str, sid: str) -> np.ndarray:
+    if scan_type == 'HF':
+        path = HF_FILES.get_images_results_filepath('MK7_BBB_pi0.75_mu_0.0_sigma1_1e-1_sigma2_1e-3_beta_1e-2', pid, sid, passthrough_num=0)
+        recon = torch.load(path, map_location='cpu')
+    else:
+        path = FF_FILES.get_images_results_filepath('MK7_BBB_pi0.5_mu_0.0_sigma1_1e-2_sigma2_3e-3_beta_1e-2', pid, sid, passthrough_num=0)
+        recon = torch.load(path, map_location='cpu')
+        if recon.shape[-2:] == (512, 512):
+            recon = recon[..., 128:-128, 128:-128].clone()
+
+    if recon.ndim == 4:
+        recon = torch.squeeze(recon, dim=1)
+    recon = torch.permute(recon, (0, 2, 1))
+    return recon.numpy()
+
+def load_evidential(scan_type: str, pid: str, sid: str) -> np.ndarray:
+    if scan_type == 'HF':
+        path = HF_FILES.get_images_results_filepath('MK7_EVIDENTIAL_nll1e0_reg1e-2_WUreg0_YEreg1e-2_NUreg1e-3_BETAreg1e-4_smooth1e0_ANNEAL', pid, sid)
+        recon = torch.load(path, map_location='cpu')['gamma']
+    else:
+        path = FF_FILES.get_images_results_filepath('MK7_EVIDENTIAL_nll1e0_reg1e-3_WUreg0_YEreg1e-2_NUreg3e-4_BETAreg1e-4_smooth1e0_ANNEAL', pid, sid)
+        recon = torch.load(path, map_location='cpu')['gamma']
+        if recon.shape[-2:] == (512, 512):
+            recon = recon[..., 128:-128, 128:-128].clone()
+
+    if recon.ndim == 4:
+        recon = torch.squeeze(recon, dim=1)
+    recon = torch.permute(recon, (0, 2, 1))
+    return recon.numpy()
+
+METHODS_TO_PLOT: List[Dict[str, Union[LoaderFunc, str]]] = [
+    {'name': 'Gated CBCT', 'loader': load_gated_cbct},
+    {'name': 'FDK', 'loader': load_fdk},
+    {'name': 'DDCNN', 'loader': load_ddcnn},
+    {'name': 'MC Dropout', 'loader': load_mcdropout},
+    {'name': 'BBB', 'loader': load_bbb},
+    {'name': 'Evidential', 'loader': load_evidential},
+]
 
 
-def extract_view(vols, tloc, view):
+# --- Arrow Customization ---
+# Arrow parameters are defined by offsets from the tumor's center pixel.
+# 'tail_offset': (dx, dy) for the arrow's tail.
+# 'head_offset': (dx, dy) for the arrow's head (tip).
+# 'lw': line width.
+DEFAULT_ARROW_PARAMS = {
+    'HF': {'tail_offset': (-55, -55), 'head_offset': (-15, -15), 'lw': 3},
+    'FF': {'tail_offset': (-27, -27), 'head_offset': (-7, -7), 'lw': 3},
+}
+
+# Add custom arrow parameters for specific scans if defaults are not ideal.
+# Key: (scan_type, pid, sid), Value: dict mapping view to params.
+CUSTOM_ARROW_PARAMS = {
+    ("FF", "26", "01"): {
+        "index":  {'tail_offset': (-27, -27), 'head_offset': (-4, -4), 'lw': 3},
+        "width":  {'tail_offset': (-22, -30), 'head_offset': (-4, -7), 'lw': 3},
+        "height": {'tail_offset': (-30, -30), 'head_offset': (-7, -7), 'lw': 3},
+    },
+    ("FF", "28", "03"): {
+        "index":  {'tail_offset': (-35, -35), 'head_offset': (-7, -7), 'lw': 3},
+        "width":  {'tail_offset': (-32, -32), 'head_offset': (-4, -4), 'lw': 3},
+        "height": {'tail_offset': (-35, -35), 'head_offset': (-7, -7), 'lw': 3},
+    },
+    ("FF", "29", "01"): {
+        "index":  {'tail_offset': (-35, 35), 'head_offset': (-7, 7), 'lw': 3},
+        "width":  {'tail_offset': (10, 40), 'head_offset': (3, 7), 'lw': 3},
+        "height": {'tail_offset': (-44, 25), 'head_offset': (-5, 6), 'lw': 3},
+    },
+    ("HF", "25", "03"): {
+        "index":  {'tail_offset': (-65, 45), 'head_offset': (-15, 10), 'lw': 3},
+        "width":  {'tail_offset': (-55, 55), 'head_offset': (-10, 10), 'lw': 3},
+        "height": {'tail_offset': (-10, -65), 'head_offset': (-2, -15), 'lw': 3},
+    },
+    ("HF", "27", "01"): {
+        "index":  {'tail_offset': (-55, 47), 'head_offset': (-14, 14), 'lw': 3},
+        "width":  {'tail_offset': (13, 48), 'head_offset': (11, 9), 'lw': 3},
+        "height": {'tail_offset': (20, 58), 'head_offset': (3, 14), 'lw': 3},
+    },
+    ("HF", "29", "01"): {
+        "index":  {'tail_offset': (-30, 70), 'head_offset': (-1, 9), 'lw': 3},
+        "width":  {'tail_offset': (5, 55), 'head_offset': (3, 4), 'lw': 3},
+        "height": {'tail_offset': (15, -60), 'head_offset': (7, -7), 'lw': 3},
+    },
+}
+
+# --- Plot Layout & Views ---
+VIEWS = ["index", "width", "height"]
+
+# Per-scan crop regions for each view: (y0, y1, x0, x1)
+CROPS = {
+    ("FF", "26", "01"): {
+        "index":  (8, 256 - 75, 8, 256 - 8),
+        "width":  (0, 160 - 0, 8, 256 - 72),
+        "height": (0, 160 - 0, 8, 256 - 8),
+    },
+    ("FF", "28", "03"): {
+        "index":  (8, 256 - 8, 8, 256 - 8),
+        "width":  (0, 160 - 0, 8, 256 - 8),
+        "height": (0, 160 - 0, 8, 256 - 8),
+    },
+    ("FF", "29", "01"): {
+        "index":  (8, 256 - 40, 8, 256 - 8),
+        "width":  (0, 160 - 0, 8, 256 - 35),
+        "height": (0, 160 - 0, 8, 256 - 8),
+    },
+    ("HF", "25", "03"): {
+        "index":  (45, 512 - 205, 120, 512 - 15),
+        "width":  (0, 160 - 0, 40, 512 - 200),
+        "height": (0, 160 - 0, 135, 512 - 20),
+    },
+    ("HF", "27", "01"): {
+        "index":  (100, 512 - 195, 95, 512 - 80),
+        "width":  (0, 160 - 0, 100, 512 - 185),
+        "height": (0, 160 - 0, 105, 512 - 80),
+    },
+    ("HF", "29", "01"): {
+        "index":  (30, 512 - 165, 30, 512 - 30),
+        "width":  (0, 160 - 0, 15, 512 - 160),
+        "height": (0, 160 - 0, 20, 512 - 25),
+    },
+}
+
+# Per-scan subplot spacing and layout adjustments
+SUBPLOTS = {
+    ("FF", "26", "01"): {"top": 0.88, "wspace": 0.03, "hspace": 0.01, "height_factor": 3.5},
+    ("FF", "28", "03"): {"top": 0.88, "wspace": 0.03, "hspace": 0.01, "height_factor": 3.5},
+    ("FF", "29", "01"): {"top": 0.88, "wspace": 0.03, "hspace": 0.0, "height_factor": 3.5},
+    ("HF", "25", "03"): {"top": 0.87, "wspace": 0.03, "hspace": 0.01, "height_factor": 3.5},
+    ("HF", "27", "01"): {"top": 0.87, "wspace": 0.03, "hspace": 0.01, "height_factor": 3.5},
+    ("HF", "29", "01"): {"top": 0.87, "wspace": 0.03, "hspace": 0.02, "height_factor": 3.6},
+}
+
+# =============================================================================
+# ------------------------- SCRIPT CORE LOGIC ---------------------------------
+# (You should not need to modify below this line)
+# =============================================================================
+
+def get_scans_to_plot() -> List[Tuple[str, str, str]]:
+    """Determines which scans to plot based on the configuration."""
+    if SCAN_SELECTION_MODE == 'direct':
+        print(f"Using directly defined scans: {DIRECT_SCANS_TO_PLOT}")
+        return DIRECT_SCANS_TO_PLOT
+    elif SCAN_SELECTION_MODE == 'agg_file':
+        print(f"Reading scans from aggregation file: {AGG_FILE_PATH}")
+        scans_agg, _ = read_scans_agg_file(AGG_FILE_PATH)
+        # Only plot test scans
+        scans = scans_agg["TEST"]
+        print(f"Found {len(scans)} scans to plot in validation/test sets.")
+        return scans
+    else:
+        raise ValueError(f"Invalid SCAN_SELECTION_MODE: {SCAN_SELECTION_MODE}")
+
+def load_tumor_location(scan_type: str, pid: str, sid: str) -> Tuple[int, int, int]:
+    """Loads and adjusts the tumor (z, y, x) coordinates for a given scan."""
+    path = TUMOR_LOC_PATHS.get(scan_type)
+    if not path or not os.path.exists(path):
+        raise FileNotFoundError(f"Tumor location file for type '{scan_type}' not found at '{path}'")
+    
+    tlocs = torch.load(path, weights_only=False)
+    # Convert patient/scan IDs to integers for indexing
+    pid_idx, sid_idx = int(pid), int(sid)
+    
+    # Assuming tlocs tensor is indexed by [pid, sid]
+    t = list(tlocs[pid_idx, sid_idx])
+    t = [t[2], t[0], t[1]]
+    
+    # The data is sliced from z=20 to z=180 (160 slices total)
+    # Adjust the z-coordinate to match the sliced volume.
+    t[0] -= 20
+
+    if scan_type == 'FF':
+        t[1] -= 128
+        t[2] -= 128
+    
+    return tuple(t) # (z, y, x)
+
+def get_arrow_params(scan: Tuple, view: str) -> Dict:
+    """Gets arrow parameters for a scan, preferring custom over default."""
+    # Check for a specific override for this scan and view
+    if scan in CUSTOM_ARROW_PARAMS and view in CUSTOM_ARROW_PARAMS[scan]:
+        return CUSTOM_ARROW_PARAMS[scan][view]
+    # Fall back to the default for the scan type
+    scan_type = scan[0]
+    return DEFAULT_ARROW_PARAMS[scan_type]
+
+def extract_view(vol: np.ndarray, tloc: Tuple, view: str) -> np.ndarray:
     """
-    vols: list of 3D-arrays [gt, fdk, pl, dd, fbp, ire]
-    tloc: (z,y,x) in index view
-    view: one of "index","height","width"
-    returns list of 2D-slices in given view order
+    Extracts a 2D slice from a 3D volume (z, y, x) based on the view.
+    
+    Args:
+        vol (np.ndarray): The 3D volume with shape (z, y, x).
+        tloc (tuple): The tumor location (z, y, x).
+        view (str): One of "index" (axial), "height" (coronal), "width" (sagittal).
+
+    Returns:
+        np.ndarray: The corresponding 2D slice.
     """
-    gt, fdk, pl, dd, fbp, ire = vols
-    if view == "index":
-        sl = int(tloc[2])
-        return [v[..., sl] for v in vols]
-    elif view == "height":
-        # swap axis 0<->2, then same as index
-        vols2 = [np.swapaxes(v, 0, 2) for v in vols]
-        sl = int(tloc[0])
-        return [v[..., sl] for v in vols2]
-    else:  # width
-        # transpose to (z,y,x)
-        vols2 = [np.transpose(v, (2, 0, 1)) for v in vols]
-        sl = int(tloc[1])
-        return [v[..., sl] for v in vols2]
+    z, y, x = tloc
+    if view == "index":   # Axial view (y-x plane) at tumor's z
+        return vol[z, :, :]
+    elif view == "height":  # Coronal view (z-x plane) at tumor's y
+        return vol[:, y, :]
+    elif view == "width":   # Sagittal view (z-y plane) at tumor's x
+        return vol[:, :, x]
+    else:
+        raise ValueError(f"Unknown view: {view}")
 
+def plot_scan(scan: Tuple[str, str, str]):
+    """
+    Generates and saves a comparison figure for a single scan.
+    """
+    scan_type, pid, sid = scan
+    print(f"\nProcessing scan: {scan_type} p{pid}_{sid}...")
+    
+    # Load all required data
+    tloc = load_tumor_location(scan_type, pid, sid)
+    vols = [m['loader'](scan_type, pid, sid) for m in METHODS_TO_PLOT]
+    names = [m['name'] for m in METHODS_TO_PLOT]
 
-def plot_scan(scan_type, pid, sid):
-    gt, fdk, pl, ddcnn, fbpcnn, ire, tloc = load_gt_and_recons(scan_type, pid, sid)
-    vols = [gt, fdk, pl, fbpcnn, ire, ddcnn]
-    # rename METHODS to match vols order:
-    names = ["FDK", "FDK", "IR", "FBPCONVNet", "IResNet", "DDCNN"]
-    ncols = len(names)
+    # Setup subplot layout
+    ncols = len(vols)
     nrows = len(VIEWS)
-    # Calculate heights so that each view fills the full horizontal space
-    # use the CROPS dict
     heights = []
     for view in VIEWS:
-        crop = CROPS.get((scan_type, pid, sid), {}).get(view)
-        if crop is not None:
+        crop = CROPS.get(scan, {}).get(view)
+        if crop:
             y0, y1, x0, x1 = crop
             height = (y1 - y0) / (x1 - x0)
             heights.append(height)
@@ -238,175 +390,92 @@ def plot_scan(scan_type, pid, sid):
             heights.append(1.0)
 
     fig, axes = plt.subplots(
-        nrows,
-        ncols,
-        figsize=(
-            3 * ncols,
-            sum(heights)
-            * SUBPLOTS.get((scan_type, pid, sid), {}).get("height_factor", 3.5),
-        ),
-        squeeze=False,
+        nrows, ncols,
+        figsize=(3 * ncols, sum(heights) * SUBPLOTS.get(scan, {}).get("height_factor", 3.5)),
         facecolor="black",
         gridspec_kw={"height_ratios": heights},
+        squeeze=False,
     )
     fig.patch.set_facecolor("black")
 
-    # add the two big titles in white, centered over the appropriate columns
-    # cols are 0…5; col 0 is gated, cols 1–5 are nonstop gated
-    fig.text(
-        x=(0 + 0.5) / ncols,
-        y=0.94,
-        s="Gated CBCT",
-        color="white",
-        weight="bold",
-        ha="center",
-        fontsize=24,
-    )
-    fig.text(
-        x=(1 + 5 + 1) / 2 / ncols,
-        y=0.94,  # midpoint of cols 1–5
-        s="Nonstop Gated CBCT",
-        color="white",
-        weight="bold",
-        ha="center",
-        fontsize=24,
-    )
+    # Add main titles for "Gated" and "Nonstop Gated" sections
+    fig.text(x=(0.5 / ncols), y=0.94, s=names[0], color="white", weight="bold", ha="center", fontsize=24)
+    fig.text(x=((1 + ncols - 1) / 2 / ncols), y=0.94, s="Nonstop-Gated CBCT", color="white", weight="bold", ha="center", fontsize=24)
+
     for i, view in enumerate(VIEWS):
-        slices = extract_view(vols, tloc, view)
-        for j, sl in enumerate(slices):
+        for j, (vol, name) in enumerate(zip(vols, names)):
             ax = axes[i, j]
+            sl = extract_view(vol, tloc, view)
 
-            # apply crop
-            crop = CROPS.get((scan_type, pid, sid), {}).get(view)
-            if crop is not None:
-                y0, y1, x0, x1 = crop
+            if CROPS.get(scan, {}).get(view):
+                y0, y1, x0, x1 = CROPS[scan][view]
                 sl = sl[y0:y1, x0:x1]
-
+            
             ax.imshow(sl, cmap="gray", vmin=0, vmax=1)
 
-            # ─── arrow pointing to tumor in the GT (first) column using ARROW_PARAMS ───────────
+            # Draw arrow on the first (ground truth) column
             if j == 0:
-                # determine tumor pixel coords for this view
-                if view == "index":
+                # Determine tumor pixel coords (y, x) for this view
+                if view == "index":   # Axial view is y-x, tumor at (tloc_y, tloc_x)
+                    ty, tx = tloc[1], tloc[2]
+                elif view == "height":  # Coronal view is z-x, tumor at (tloc_z, tloc_x)
+                    ty, tx = tloc[0], tloc[2]
+                else:  # Sagittal view is z-y, tumor at (tloc_z, tloc_y)
                     ty, tx = tloc[0], tloc[1]
-                elif view == "width":
-                    # for width‐view we transposed (2,0,1) so x=orig y, y=orig z
-                    ty, tx = tloc[2], tloc[0]
-                else:  # height
-                    # for height‐view we swapaxes(0,2) so x=orig x, y=orig z
-                    ty, tx = tloc[2], tloc[1]
 
-                # adjust for crop
-                crop = CROPS.get((scan_type, pid, sid), {}).get(view)
-                if crop is not None:
-                    y0, y1, x0, x1 = crop
+                if CROPS.get(scan, {}).get(view):
+                    y0, y1, x0, x1 = CROPS[scan][view]
                     ty -= y0
                     tx -= x0
 
-                # pull params (or use defaults)
-                cfg = ARROW_PARAMS.get((scan_type, pid, sid), {}).get(
-                    view,
-                    {"tail_dx": 30, "tail_dy": 30, "tip_dx": 0, "tip_dy": 0, "lw": 3},
-                )
-                tail_dx = cfg["tail_dx"]
-                tail_dy = cfg["tail_dy"]
-                tip_dx = cfg["tip_dx"]
-                tip_dy = cfg["tip_dy"]
-                lw = cfg["lw"]
-
-                # draw arrow
+                params = get_arrow_params(scan, view)
+                tail_dx, tail_dy = params['tail_offset']
+                head_dx, head_dy = params['head_offset']
+                
                 ax.annotate(
                     "",
-                    xy=(tx + tip_dx, ty + tip_dy),  # arrow head at tumor (+ tip shift)
-                    xytext=(tx + tail_dx, ty + tail_dy),  # tail position
-                    arrowprops=dict(
-                        color="white",
-                        arrowstyle="->",
-                        lw=lw,
-                    ),
+                    xy=(tx + head_dx, ty + head_dy), # Arrow head
+                    xytext=(tx + tail_dx, ty + tail_dy), # Arrow tail
+                    arrowprops=dict(color="white", arrowstyle="->", lw=params['lw']),
                 )
-            # ────────────────────────────────────────────────────────────────
 
-            if i == 0:
-                ax.set_title(names[j], fontsize=20, color="white", weight="bold")
+            if i == 0 and j > 0: # Set titles for nonstop gated columns
+                ax.set_title(name, fontsize=20, color="white", weight="bold")
             ax.axis("off")
 
-    # tighten up margins so images butt right up against each other
     fig.subplots_adjust(
-        left=0.01,
-        right=0.99,
-        top=SUBPLOTS.get((scan_type, pid, sid), {}).get("top", 0.9),
-        bottom=0.02,
-        wspace=0.01,
-        hspace=SUBPLOTS.get((scan_type, pid, sid), {}).get("hspace", 0.05),
+        left=0.01, right=0.99,
+        top=SUBPLOTS.get(scan, {}).get("top", 0.9),
+        bottom=0.02, wspace=SUBPLOTS.get(scan, {}).get("wspace", 0.01),
+        hspace=SUBPLOTS.get(scan, {}).get("hspace", 0.05),
     )
 
-    # ─── add subplot letter labels a)–r) ────────────────────────────────────────
-    # total subplots = nrows * ncols
-    labels = [f"{chr(ord('a') + k)})" for k in range(nrows * ncols)]
-    k = 0
-    for i in range(nrows):
-        for j in range(ncols):
-            ax = axes[i, j]
-            ax.text(
-                0.02,
-                0.97,  # small inset from top‐left
-                labels[k],
-                color="white",
-                weight="bold",
-                fontsize=16,
-                va="top",
-                ha="left",
-                transform=ax.transAxes,
-            )
-            k += 1
-    # ──────────────────────────────────────────────────────────────────────────
+    # Draw dashed box around the first (gated) column
+    rect_pos = axes[0, 0].get_position()
+    fig.patches.append(patches.Rectangle(
+        (rect_pos.x0 - 0.005, 0.01), rect_pos.width + 0.01, 0.98,
+        transform=fig.transFigure, fill=False, edgecolor="white",
+        linestyle="--", linewidth=2, clip_on=False
+    ))
 
-    # ─── draw dashed box around the first (gated) column ─────────────────────────
-    # halfway between title baseline and top of figure:
-    y_top = 0.99
-
-    # get bottom edge of the bottom gated subplot:
-    ax_bl = axes[-1, 0]
-    pos_bl = ax_bl.get_position()
-    y_bot = pos_bl.y0
-
-    # halfway between bottom subplot and bottom of figure:
-    y_bottom = y_bot / 2.0
-
-    # left edge and width of the gated column (unchanged):
-    ax_tl = axes[0, 0]
-    pos_tl = ax_tl.get_position()
-    x0 = pos_tl.x0
-    width = pos_tl.width
-
-    # draw the dashed box from y_bottom up to y_top:
-    rect = patches.Rectangle(
-        (x0, y_bottom),
-        width,
-        y_top - y_bottom,
-        transform=fig.transFigure,
-        fill=False,
-        edgecolor="white",
-        linestyle="--",
-        linewidth=2,
-    )
-    fig.patches.append(rect)
-    # ─────────────────────────────────────────────────────────────────────────────
-
+    # Save the figure
     outname_png = f"{scan_type}_p{pid}_{sid}.png"
     outname_pdf = f"{scan_type}_p{pid}_{sid}.pdf"
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    fig.savefig(os.path.join(OUTPUT_DIR, outname_png), dpi=400)
-    fig.savefig(os.path.join(OUTPUT_DIR, outname_pdf), dpi=400)
+    fig.savefig(os.path.join(OUTPUT_DIR, outname_png), dpi=600, facecolor='black')
+    fig.savefig(os.path.join(OUTPUT_DIR, outname_pdf), dpi=600, facecolor='black')
     plt.close(fig)
-    print("Saved", outname_png, "and", outname_pdf)
-
+    print(f"Saved: {outname_png} and {outname_pdf}")
 
 def main():
-    for scan in SCANS:
-        plot_scan(*scan)
+    """Main execution function."""
+    scans_to_run = get_scans_to_plot()
+    if not scans_to_run:
+        print("No scans selected for plotting. Please check the configuration.")
+        return
 
+    for scan_details in scans_to_run:
+        plot_scan(scan_details)
 
 if __name__ == "__main__":
     main()

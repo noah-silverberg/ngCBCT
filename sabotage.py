@@ -2,14 +2,14 @@ import os
 import numpy as np
 import mat73
 import scipy.io as sio  # for saving .mat files
+from pipeline.utils import read_scans_agg_file
 
-n = 3                          # every n-th ORIGINAL cycle
+n = 4                          # every n-th ORIGINAL cycle
 offset = 0                     # 0..n-1 to shift which original cycle counts as first
-modifier = 'SABOTAGE_third'    # name for output folder
-# hf_scans = [('08', '01'), ('10', '01'), ('14', '01'), ('15', '01'), ('20', '01'), ('24', '01')]
-hf_scans = [('01', '01')]
-ff_scans = None
-# ff_scans = [('06', '01'), ('16', '01'), ('18', '01'), ('22', '01'), ('26', '01'), ('27', '01')]
+modifier = 'SABOTAGE_fourth'    # name for output folder
+
+hf_scans = [(p, s) for p, s, st in read_scans_agg_file('scans_to_agg.txt')[0]['TEST']]
+ff_scans = [(p, s) for p, s, st in read_scans_agg_file('scans_to_agg_FF.txt')[0]['TEST']]
 
 mat_projections_dir = os.path.join(r"H:\Public\Noah", "mat")
 mat_projections_dir_SABOTAGE = os.path.join(r"H:\Public\Noah", f"mat_{modifier}")
@@ -93,6 +93,11 @@ for file in os.listdir(mat_projections_dir):
     # Skip files that are not in either list
     if scan_files and (file not in scan_files):
         print(f"Skipping {file} as it is not in the specified scan lists.")
+        continue
+
+    # Skip files that are already in the sabotage directory
+    if os.path.exists(os.path.join(mat_projections_dir_SABOTAGE, file)):
+        print(f"Skipping {file} as it already exists in the sabotage directory.")
         continue
 
     path = os.path.join(mat_projections_dir, file)

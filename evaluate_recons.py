@@ -437,6 +437,10 @@ def main():
                 generate_per_scan_plot(psnr_results, "PSNR", gt.shape[2], os.path.join(odir, "PSNR_per_slice.png"))
 
                 # --- 2. Store data for the master plots ---
+                # Ensure models are in a specific order for the master plot
+                model_order = ["FDK", "PL", "FBPCONVNet", "IResNet", "DDCNN"]
+                ssim_results = {name: ssim_results[name] for name in model_order if name in ssim_results}
+                psnr_results = {name: psnr_results[name] for name in model_order if name in psnr_results}
                 scan_plot_data = {
                     'ssim': ssim_results,
                     'psnr': psnr_results,

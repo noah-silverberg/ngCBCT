@@ -50,8 +50,8 @@ CROPS = {
 SCAN_TIMES = {
     ("HF", "20", "01"): {"gated": "6.3 min", "nonstop": "1 min"},
     ("HF", "14", "01"): {"gated": "3.2 min", "nonstop": "1 min"},
-    ("FF", "22", "01"): {"gated": "5.4 min", "nonstop": "0.6 min"},
-    ("FF", "18", "01"): {"gated": "2.1 min", "nonstop": "0.6 min"},
+    ("FF", "22", "01"): {"gated": "5.4 min", "nonstop": "0.56 min"},
+    ("FF", "18", "01"): {"gated": "2.1 min", "nonstop": "0.56 min"},
 }
 
 # per‐scan, per‐view arrow customization:
@@ -96,13 +96,6 @@ ARROW_PARAMS = {
 }
 
 VIEWS = ["index", "width", "height"]
-METHODS = [
-    ("u_FDK", "FDK"),
-    ("u_PL", "IR"),
-    ("FBPCONVNet", "FBPCONVNet"),
-    ("IResNet", "IResNet"),
-    ("DDCNN", "DDCNN"),
-]
 
 
 def load_gt_and_recons(scan_type, pid, sid):
@@ -207,7 +200,7 @@ def plot_scan(scan_type, pid, sid):
     gt, fdk, pl, ddcnn, fbpcnn, ire, tloc = load_gt_and_recons(scan_type, pid, sid)
     vols = [gt, fdk, pl, fbpcnn, ire, ddcnn]
     # rename METHODS to match vols order:
-    names = ["FDK", "FDK", "IR", "FBPCONVNet", "IResNet", "DDCNN"]
+    names = ["FDK", "FDK", "PL", "FBPCONVNet", "IResNet", "DDCNN"]
     ncols = len(names)
     nrows = len(VIEWS)
     # Calculate heights so that each view fills the full horizontal space
@@ -224,7 +217,7 @@ def plot_scan(scan_type, pid, sid):
 
     # --- Automatic figsize calculation ---
     subplot_base_width_inches = 3.0
-    top_padding_inches = 1.2
+    top_padding_inches = 1.3
 
     fig_width = subplot_base_width_inches * ncols
     image_area_height = subplot_base_width_inches * sum(heights)
@@ -240,53 +233,6 @@ def plot_scan(scan_type, pid, sid):
         gridspec_kw={"height_ratios": heights},
     )
     fig.patch.set_facecolor("black")
-
-    # --- Add Titles ---
-    top_of_plots = image_area_height / fig_height
-    top_margin_height = 1.0 - top_of_plots
-    main_title_y = top_of_plots + top_margin_height * 0.70
-    scan_time_y = top_of_plots + top_margin_height * 0.5
-
-    # Main titles (Gated/Nonstop)
-    fig.text(
-        x=(0 + 0.5) / ncols,
-        y=main_title_y,
-        s="Gated CBCT",
-        color="white",
-        weight="bold",
-        ha="center",
-        fontsize=24,
-    )
-    fig.text(
-        x=(1 + 5 + 1) / 2 / ncols,
-        y=main_title_y,
-        s="Nonstop Gated CBCT",
-        color="white",
-        weight="bold",
-        ha="center",
-        fontsize=24,
-    )
-
-    # Scan time subtitles
-    scan_key = (scan_type, pid, sid)
-    times = SCAN_TIMES.get(scan_key)
-    if times:
-        fig.text(
-            x=(0 + 0.5) / ncols,
-            y=scan_time_y,
-            s=f"Scan Time: {times['gated']}",
-            color="white",
-            ha="center",
-            fontsize=16,
-        )
-        fig.text(
-            x=(1 + 5 + 1) / 2 / ncols,
-            y=scan_time_y,
-            s=f"Scan Time: {times['nonstop']}",
-            color="white",
-            ha="center",
-            fontsize=16,
-        )
 
     for i, view in enumerate(VIEWS):
         slices = extract_view(vols, tloc, view)
@@ -349,14 +295,65 @@ def plot_scan(scan_type, pid, sid):
             ax.axis("off")
 
     # tighten up margins so images butt right up against each other
+    top_of_plots = image_area_height / fig_height
     fig.subplots_adjust(
         left=0.01,
         right=0.99,
         top=top_of_plots,
         bottom=0.02,
-        wspace=0.01,
-        hspace=0.01,
+        wspace=0.02,
+        hspace=0.05,
     )
+
+    # --- Add Titles ---
+    top_margin_height = 1.0 - top_of_plots
+    main_title_y = top_of_plots + top_margin_height * 0.68
+    scan_time_y = top_of_plots + top_margin_height * 0.45
+
+    # Get the position of the first (gated) column to perfectly center its titles
+    gated_ax_pos = axes[0, 0].get_position()
+    gated_center_x = gated_ax_pos.x0 + gated_ax_pos.width / 2.0
+
+    # Main titles (Gated/Nonstop)
+    fig.text(
+        x=gated_center_x,  # Use the calculated center
+        y=main_title_y,
+        s="Gated CBCT",
+        color="white",
+        weight="bold",
+        ha="center",
+        fontsize=24,
+    )
+    fig.text(
+        x=(1 + 5 + 1) / 2 / ncols,
+        y=main_title_y,
+        s="Nonstop Gated CBCT",
+        color="white",
+        weight="bold",
+        ha="center",
+        fontsize=24,
+    )
+
+    # Scan time subtitles
+    scan_key = (scan_type, pid, sid)
+    times = SCAN_TIMES.get(scan_key)
+    if times:
+        fig.text(
+            x=gated_center_x,  # Use the calculated center
+            y=scan_time_y,
+            s=f"Scan Time: {times['gated']}",
+            color="white",
+            ha="center",
+            fontsize=16,
+        )
+        fig.text(
+            x=(1 + 5 + 1) / 2 / ncols,
+            y=scan_time_y,
+            s=f"Scan Time: {times['nonstop']}",
+            color="white",
+            ha="center",
+            fontsize=16,
+        )
 
     # # ─── add subplot letter labels a)–r) ────────────────────────────────────────
     # # total subplots = nrows * ncols

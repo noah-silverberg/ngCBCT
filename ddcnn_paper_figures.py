@@ -46,29 +46,6 @@ CROPS = {
     },
 }
 
-SUBPLOTS = {
-    ("HF", "20", "01"): {
-        "top": 0.85,
-        "hspace": 0.05,
-        "height_factor": 3.7,
-    },
-    ("HF", "14", "01"): {
-        "top": 0.88,
-        "hspace": 0.01,
-        "height_factor": 3.5,
-    },
-    ("FF", "22", "01"): {
-        "top": 0.88,
-        "hspace": 0.05,
-        "height_factor": 3.4,
-    },
-    ("FF", "18", "01"): {
-        "top": 0.88,
-        "hspace": 0.01,
-        "height_factor": 3.5,
-    },
-}
-
 # per‐scan, per‐view arrow customization:
 # keys are (scan_type, pid, sid), values are dicts mapping view→params
 # params:
@@ -237,14 +214,19 @@ def plot_scan(scan_type, pid, sid):
         else:
             heights.append(1.0)
 
+    # --- Automatic figsize calculation ---
+    subplot_base_width_inches = 3.0
+    top_padding_inches = 0.8
+
+    fig_width = subplot_base_width_inches * ncols
+    image_area_height = subplot_base_width_inches * sum(heights)
+    fig_height = image_area_height + top_padding_inches
+    # ------------------------------------
+
     fig, axes = plt.subplots(
         nrows,
         ncols,
-        figsize=(
-            3 * ncols,
-            sum(heights)
-            * SUBPLOTS.get((scan_type, pid, sid), {}).get("height_factor", 3.5),
-        ),
+        figsize=(fig_width, fig_height),
         squeeze=False,
         facecolor="black",
         gridspec_kw={"height_ratios": heights},
@@ -253,9 +235,10 @@ def plot_scan(scan_type, pid, sid):
 
     # add the two big titles in white, centered over the appropriate columns
     # cols are 0…5; col 0 is gated, cols 1–5 are nonstop gated
+    title_y_position = (1.0 + (image_area_height / fig_height)) / 2.0
     fig.text(
         x=(0 + 0.5) / ncols,
-        y=0.94,
+        y=title_y_position,
         s="Gated CBCT",
         color="white",
         weight="bold",
@@ -264,7 +247,7 @@ def plot_scan(scan_type, pid, sid):
     )
     fig.text(
         x=(1 + 5 + 1) / 2 / ncols,
-        y=0.94,  # midpoint of cols 1–5
+        y=title_y_position,  # midpoint of cols 1–5
         s="Nonstop Gated CBCT",
         color="white",
         weight="bold",
@@ -335,10 +318,10 @@ def plot_scan(scan_type, pid, sid):
     fig.subplots_adjust(
         left=0.01,
         right=0.99,
-        top=SUBPLOTS.get((scan_type, pid, sid), {}).get("top", 0.9),
+        top=image_area_height / fig_height,
         bottom=0.02,
         wspace=0.01,
-        hspace=SUBPLOTS.get((scan_type, pid, sid), {}).get("hspace", 0.05),
+        hspace=0.01,
     )
 
     # # ─── add subplot letter labels a)–r) ────────────────────────────────────────

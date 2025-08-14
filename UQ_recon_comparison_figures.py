@@ -35,17 +35,17 @@ SCAN_SELECTION_MODE = 'direct'  # Options: 'direct', 'agg_file'
 # Used if SCAN_SELECTION_MODE is 'direct'.
 # List of tuples, where each tuple is (scan_type, patient_id, scan_id).
 DIRECT_SCANS_TO_PLOT = [
-    # ("FF", "26", "01"),
-    # ("FF", "28", "03"),
-    # ("FF", "29", "01"),
-    # ("HF", "25", "03"),
-    # ("HF", "27", "01"),
+    ("FF", "26", "01"),
+    ("FF", "28", "03"),
+    ("FF", "29", "01"),
+    ("HF", "25", "03"),
+    ("HF", "27", "01"),
     ("HF", "29", "01"),
 ]
 
 # Used if SCAN_SELECTION_MODE is 'agg_file'.
 # Path to a text file listing scans (see `_read_scans_agg_file` for format).
-AGG_FILE_PATH = "scans_to_agg_FF.txt"
+AGG_FILE_PATH = "scans_to_agg.txt"
 
 # --- Tumor Location Data ---
 # Paths to the .pt files containing tumor locations for HF and FF scans.
@@ -54,6 +54,19 @@ AGG_FILE_PATH = "scans_to_agg_FF.txt"
 TUMOR_LOC_PATHS = {
     "HF": "H:/Public/Noah/tumor_location_NEW.pt",
     "FF": "H:/Public/Noah/tumor_location_FF_NEW.pt",
+}
+
+# --- Scan Time Data ---
+# Scan times for Gated and Nonstop acquisitions.
+# TODO: Please replace these placeholder values with the actual data.
+SCAN_TIMES = {
+    # (scan_type, pid, sid): {"gated": "X min", "nonstop": "Y min"}
+    ("FF", "26", "01"): {"gated": "???? min", "nonstop": "0.56 min"},
+    ("FF", "28", "03"): {"gated": "???? min", "nonstop": "0.56 min"},
+    ("FF", "29", "01"): {"gated": "???? min", "nonstop": "0.56 min"},
+    ("HF", "25", "03"): {"gated": "???? min", "nonstop": "1 min"},
+    ("HF", "27", "01"): {"gated": "???? min", "nonstop": "1 min"},
+    ("HF", "29", "01"): {"gated": "???? min", "nonstop": "1 min"},
 }
 
 # --- Method & Data Loader Definitions ---
@@ -279,16 +292,6 @@ CROPS = {
     },
 }
 
-# Per-scan subplot spacing and layout adjustments
-SUBPLOTS = {
-    ("FF", "26", "01"): {"top": 0.88, "wspace": 0.03, "hspace": 0.01, "height_factor": 3.5},
-    ("FF", "28", "03"): {"top": 0.88, "wspace": 0.03, "hspace": 0.01, "height_factor": 3.5},
-    ("FF", "29", "01"): {"top": 0.88, "wspace": 0.03, "hspace": 0.0, "height_factor": 3.5},
-    ("HF", "25", "03"): {"top": 0.87, "wspace": 0.03, "hspace": 0.01, "height_factor": 3.5},
-    ("HF", "27", "01"): {"top": 0.87, "wspace": 0.03, "hspace": 0.01, "height_factor": 3.5},
-    ("HF", "29", "01"): {"top": 0.87, "wspace": 0.03, "hspace": 0.02, "height_factor": 3.6},
-}
-
 # =============================================================================
 # ------------------------- SCRIPT CORE LOGIC ---------------------------------
 # (You should not need to modify below this line)
@@ -314,15 +317,15 @@ def load_tumor_location(scan_type: str, pid: str, sid: str) -> Tuple[int, int, i
     path = TUMOR_LOC_PATHS.get(scan_type)
     if not path or not os.path.exists(path):
         raise FileNotFoundError(f"Tumor location file for type '{scan_type}' not found at '{path}'")
-    
+
     tlocs = torch.load(path, weights_only=False)
     # Convert patient/scan IDs to integers for indexing
     pid_idx, sid_idx = int(pid), int(sid)
-    
+
     # Assuming tlocs tensor is indexed by [pid, sid]
     t = list(tlocs[pid_idx, sid_idx])
     t = [t[2], t[0], t[1]]
-    
+
     # The data is sliced from z=20 to z=180 (160 slices total)
     # Adjust the z-coordinate to match the sliced volume.
     t[0] -= 20
@@ -330,7 +333,7 @@ def load_tumor_location(scan_type: str, pid: str, sid: str) -> Tuple[int, int, i
     if scan_type == 'FF':
         t[1] -= 128
         t[2] -= 128
-    
+
     return tuple(t) # (z, y, x)
 
 def get_arrow_params(scan: Tuple, view: str) -> Dict:
@@ -345,7 +348,7 @@ def get_arrow_params(scan: Tuple, view: str) -> Dict:
 def extract_view(vol: np.ndarray, tloc: Tuple, view: str) -> np.ndarray:
     """
     Extracts a 2D slice from a 3D volume (z, y, x) based on the view.
-    
+
     Args:
         vol (np.ndarray): The 3D volume with shape (z, y, x).
         tloc (tuple): The tumor location (z, y, x).
@@ -370,13 +373,13 @@ def plot_scan(scan: Tuple[str, str, str]):
     """
     scan_type, pid, sid = scan
     print(f"\nProcessing scan: {scan_type} p{pid}_{sid}...")
-    
+
     # Load all required data
     tloc = load_tumor_location(scan_type, pid, sid)
     vols = [m['loader'](scan_type, pid, sid) for m in METHODS_TO_PLOT]
     names = [m['name'] for m in METHODS_TO_PLOT]
 
-    # Setup subplot layout
+    # --- Automatic Layout Calculation ---
     ncols = len(vols)
     nrows = len(VIEWS)
     heights = []
@@ -384,24 +387,30 @@ def plot_scan(scan: Tuple[str, str, str]):
         crop = CROPS.get(scan, {}).get(view)
         if crop:
             y0, y1, x0, x1 = crop
-            height = (y1 - y0) / (x1 - x0)
+            height = (y1 - y0) / (x1 - x0) if (x1 - x0) > 0 else 1.0
             heights.append(height)
         else:
             heights.append(1.0)
 
+    # Define base parameters for sizing
+    subplot_base_width_inches = 3.0
+    top_padding_inches = 1.2 # Increased padding for two rows of titles
+
+    # Calculate final figure dimensions
+    fig_width = subplot_base_width_inches * ncols
+    image_area_height = subplot_base_width_inches * sum(heights)
+    fig_height = image_area_height + top_padding_inches
+
     fig, axes = plt.subplots(
         nrows, ncols,
-        figsize=(3 * ncols, sum(heights) * SUBPLOTS.get(scan, {}).get("height_factor", 3.5)),
+        figsize=(fig_width, fig_height),
         facecolor="black",
         gridspec_kw={"height_ratios": heights},
         squeeze=False,
     )
     fig.patch.set_facecolor("black")
 
-    # Add main titles for "Gated" and "Nonstop Gated" sections
-    fig.text(x=(0.5 / ncols), y=0.94, s=names[0], color="white", weight="bold", ha="center", fontsize=24)
-    fig.text(x=((1 + ncols - 1) / 2 / ncols), y=0.94, s="Nonstop-Gated CBCT", color="white", weight="bold", ha="center", fontsize=24)
-
+    # --- Plotting Loop ---
     for i, view in enumerate(VIEWS):
         for j, (vol, name) in enumerate(zip(vols, names)):
             ax = axes[i, j]
@@ -410,7 +419,7 @@ def plot_scan(scan: Tuple[str, str, str]):
             if CROPS.get(scan, {}).get(view):
                 y0, y1, x0, x1 = CROPS[scan][view]
                 sl = sl[y0:y1, x0:x1]
-            
+
             ax.imshow(sl, cmap="gray", vmin=0, vmax=1)
 
             # Draw arrow on the first (ground truth) column
@@ -431,7 +440,7 @@ def plot_scan(scan: Tuple[str, str, str]):
                 params = get_arrow_params(scan, view)
                 tail_dx, tail_dy = params['tail_offset']
                 head_dx, head_dy = params['head_offset']
-                
+
                 ax.annotate(
                     "",
                     xy=(tx + head_dx, ty + head_dy), # Arrow head
@@ -443,17 +452,53 @@ def plot_scan(scan: Tuple[str, str, str]):
                 ax.set_title(name, fontsize=20, color="white", weight="bold")
             ax.axis("off")
 
+    # --- Final Layout Adjustments and Titling ---
+    top_of_plots = image_area_height / fig_height
     fig.subplots_adjust(
         left=0.01, right=0.99,
-        top=SUBPLOTS.get(scan, {}).get("top", 0.9),
-        bottom=0.02, wspace=SUBPLOTS.get(scan, {}).get("wspace", 0.01),
-        hspace=SUBPLOTS.get(scan, {}).get("hspace", 0.05),
+        top=top_of_plots,
+        bottom=0.02, wspace=0.01,
+        hspace=0.03,
     )
 
-    # Draw dashed box around the first (gated) column
-    rect_pos = axes[0, 0].get_position()
+    # Add titles AFTER layout is finalized to ensure correct positioning
+    top_margin_height = 1.0 - top_of_plots
+    main_title_y = top_of_plots + top_margin_height * 0.63
+    scan_time_y = top_of_plots + top_margin_height * 0.40
+
+    # Gated Title and Time
+    gated_ax_pos = axes[0, 0].get_position()
+    gated_center_x = gated_ax_pos.x0 + gated_ax_pos.width / 2.0
+    fig.text(x=gated_center_x, y=main_title_y, s=names[0], color="white", weight="bold", ha="center", fontsize=24)
+
+    # Nonstop Title and Time
+    nonstop_start_pos = axes[0, 1].get_position()
+    nonstop_end_pos = axes[0, -1].get_position()
+    nonstop_center_x = (nonstop_start_pos.x0 + nonstop_end_pos.x1) / 2.0
+    fig.text(x=nonstop_center_x, y=main_title_y, s="Nonstop-Gated CBCT", color="white", weight="bold", ha="center", fontsize=24)
+
+    times = SCAN_TIMES.get(scan)
+    if times:
+        fig.text(x=gated_center_x, y=scan_time_y, s=f"Scan Time: {times['gated']}", color="white", ha="center", fontsize=16)
+        fig.text(x=nonstop_center_x, y=scan_time_y, s=f"Scan Time: {times['nonstop']}", color="white", ha="center", fontsize=16)
+
+
+    # Draw dashed box around the first (gated) column to include titles
+    pos_tl = axes[0, 0].get_position()
+    pos_bl = axes[-1, 0].get_position()
+
+    # Define the box boundaries in figure coordinates
+    box_x = pos_tl.x0 - 0.005
+    box_width = pos_tl.width + 0.01
+    
+    # Start the box halfway between the bottom of the figure and the bottom image
+    box_y = pos_bl.y0 / 2.0 
+    
+    # Extend the box from its bottom to the very top of the figure
+    box_height = 0.99 - box_y 
+
     fig.patches.append(patches.Rectangle(
-        (rect_pos.x0 - 0.005, 0.01), rect_pos.width + 0.01, 0.98,
+        (box_x, box_y), box_width, box_height,
         transform=fig.transFigure, fill=False, edgecolor="white",
         linestyle="--", linewidth=2, clip_on=False
     ))

@@ -3,6 +3,11 @@ import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
+import warnings
+from scipy.stats import ttest_ind # <<< 1. IMPORT T-TEST FUNCTION
+
+# Supress warnings
+warnings.filterwarnings("ignore")
 
 # --- 1. Data Loading and Preparation ---
 
@@ -64,15 +69,21 @@ if not rows_per_model.groupby('model_name').nunique().eq(1).all():
 master_df['sample_avg_ssim'] *= 100
 master_df['rmv'] *= 100
 
-# --- 2. Plot Generation ---
+# --- 2. Statistical Analysis Setup ---
+
+# <<< 2. INITIALIZE A LIST TO STORE RESULTS
+ttest_results = []
+# Pairings for the t-tests
+comparisons = [('50%', '33%'), ('50%', '25%'), ('33%', '25%')]
+
+
+# --- 3. Plot Generation & T-Tests ---
 
 fig, axes = plt.subplots(3, 5, figsize=(14, 8), sharex=True, sharey=False)
 
 duty_cycle_order = ['50%', '33%', '25%']
 
-# MODIFICATION: Use the "pastel" color palette as requested
 duty_cycle_palette = sns.color_palette("pastel", n_colors=len(duty_cycle_order))
-# END MODIFICATION
 
 for i, (metric_col, metric_name) in enumerate(metrics_to_plot.items()):
     for j, model_name in enumerate(models_to_plot):
@@ -122,7 +133,28 @@ for i, (metric_col, metric_name) in enumerate(metrics_to_plot.items()):
             ax.tick_params(axis='x', bottom=False, labelbottom=False)
         ax.grid(True, linestyle='--', alpha=0.5)
 
-# --- 3. Create Shared Legend ---
+        # <<< 3. PERFORM T-TESTS WITHIN THE LOOP
+        if metric_name == 'RMV ($x10^{-2}$)':
+            # This dictionary will store the p-values for the current model and metric
+            p_values = {}
+            for group1, group2 in comparisons:
+                # Extract the paired data for the two groups
+                data1 = model_data[model_data['duty_cycle'] == group1][metric_col]
+                data2 = model_data[model_data['duty_cycle'] == group2][metric_col]
+
+                # Perform the t-test
+                t_stat, p_val = ttest_ind(data1, data2, equal_var=False)
+                p_values[f'p_val_{group1.replace("%","")}_vs_{group2.replace("%","")}'] = p_val
+                
+            # Append the results for this model/metric to our list
+            ttest_results.append({
+                'model': model_name,
+                'metric': metric_name,
+                **p_values
+            })
+
+
+# --- 4. Final Touches & Saving ---
 legend_handles = [Patch(facecolor=duty_cycle_palette[k], alpha=0.8, edgecolor='black',
                         label=f'{label} Duty Cycle')
                   for k, label in enumerate(duty_cycle_order)]
@@ -130,16 +162,27 @@ legend_handles = [Patch(facecolor=duty_cycle_palette[k], alpha=0.8, edgecolor='b
 fig.legend(handles=legend_handles, loc='lower center', ncol=3,
            bbox_to_anchor=(0.5, 0.01), fontsize=12, frameon=False)
 
-# MODIFICATION: Use subplots_adjust for manual control over spacing
 # You can tune these values to change how close the plots are to each other.
 # wspace: horizontal space between plots
 # hspace: vertical space between plots
 fig.subplots_adjust(left=0.05, right=0.98, top=0.93, bottom=0.1, wspace=0.17, hspace=0.08)
 
 # --- 4. Save the Figure ---
-# MODIFICATION: Use the consistent filename as requested
 output_filename = 'sabotage_violins_HF.png'
 plt.savefig(output_filename, dpi=600, bbox_inches='tight')
 plt.close(fig)
 
 print(f"Figure saved successfully to '{output_filename}'")
+
+
+# --- 5. Display T-Test Results ---
+
+# <<< 4. PRINT THE COLLECTED RESULTS AT THE END
+print("\n--- Paired T-Test Results (P-values) ---")
+results_df = pd.DataFrame(ttest_results)
+# Format the p-values for better readability
+for col in results_df.columns:
+    if 'p_val' in col:
+        results_df[col] = results_df[col].apply(lambda x: f"{x:.6f}")
+
+print(results_df.to_string())

@@ -46,6 +46,14 @@ CROPS = {
     },
 }
 
+# Scan times for Gated and Nonstop acquisitions
+SCAN_TIMES = {
+    ("HF", "20", "01"): {"gated": "6.3 min", "nonstop": "1 min"},
+    ("HF", "14", "01"): {"gated": "3.2 min", "nonstop": "1 min"},
+    ("FF", "22", "01"): {"gated": "5.4 min", "nonstop": "0.6 min"},
+    ("FF", "18", "01"): {"gated": "2.1 min", "nonstop": "0.6 min"},
+}
+
 # per‐scan, per‐view arrow customization:
 # keys are (scan_type, pid, sid), values are dicts mapping view→params
 # params:
@@ -216,7 +224,7 @@ def plot_scan(scan_type, pid, sid):
 
     # --- Automatic figsize calculation ---
     subplot_base_width_inches = 3.0
-    top_padding_inches = 0.8
+    top_padding_inches = 1.2
 
     fig_width = subplot_base_width_inches * ncols
     image_area_height = subplot_base_width_inches * sum(heights)
@@ -233,12 +241,16 @@ def plot_scan(scan_type, pid, sid):
     )
     fig.patch.set_facecolor("black")
 
-    # add the two big titles in white, centered over the appropriate columns
-    # cols are 0…5; col 0 is gated, cols 1–5 are nonstop gated
-    title_y_position = (1.0 + (image_area_height / fig_height)) / 2.0
+    # --- Add Titles ---
+    top_of_plots = image_area_height / fig_height
+    top_margin_height = 1.0 - top_of_plots
+    main_title_y = top_of_plots + top_margin_height * 0.70
+    scan_time_y = top_of_plots + top_margin_height * 0.5
+
+    # Main titles (Gated/Nonstop)
     fig.text(
         x=(0 + 0.5) / ncols,
-        y=title_y_position,
+        y=main_title_y,
         s="Gated CBCT",
         color="white",
         weight="bold",
@@ -247,13 +259,35 @@ def plot_scan(scan_type, pid, sid):
     )
     fig.text(
         x=(1 + 5 + 1) / 2 / ncols,
-        y=title_y_position,  # midpoint of cols 1–5
+        y=main_title_y,
         s="Nonstop Gated CBCT",
         color="white",
         weight="bold",
         ha="center",
         fontsize=24,
     )
+
+    # Scan time subtitles
+    scan_key = (scan_type, pid, sid)
+    times = SCAN_TIMES.get(scan_key)
+    if times:
+        fig.text(
+            x=(0 + 0.5) / ncols,
+            y=scan_time_y,
+            s=f"Scan Time: {times['gated']}",
+            color="white",
+            ha="center",
+            fontsize=16,
+        )
+        fig.text(
+            x=(1 + 5 + 1) / 2 / ncols,
+            y=scan_time_y,
+            s=f"Scan Time: {times['nonstop']}",
+            color="white",
+            ha="center",
+            fontsize=16,
+        )
+
     for i, view in enumerate(VIEWS):
         slices = extract_view(vols, tloc, view)
         for j, sl in enumerate(slices):
@@ -311,14 +345,14 @@ def plot_scan(scan_type, pid, sid):
             # ────────────────────────────────────────────────────────────────
 
             if i == 0:
-                ax.set_title(names[j], fontsize=20, color="white", weight="bold")
+                ax.set_title(names[j], fontsize=20, color="white", weight="bold", pad=15)
             ax.axis("off")
 
     # tighten up margins so images butt right up against each other
     fig.subplots_adjust(
         left=0.01,
         right=0.99,
-        top=image_area_height / fig_height,
+        top=top_of_plots,
         bottom=0.02,
         wspace=0.01,
         hspace=0.01,

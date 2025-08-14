@@ -13,7 +13,7 @@ warnings.filterwarnings("ignore")
 
 # Use the cleaner 'MC Dropout (50)' name
 models_to_plot = [
-    'Ensemble (10)', 'BBB (50)', 'MC Dropout (50)',
+    'Ensemble (10)', 'MC Dropout (50)', 'BBB (50)',
     'Evidential (01)', 'Auxiliary (01)'
 ]
 # MODIFICATION: Update labels for SSIM and RMV for the plot
@@ -83,7 +83,13 @@ fig, axes = plt.subplots(3, 5, figsize=(14, 8), sharex=True, sharey=False)
 
 duty_cycle_order = ['50%', '33%', '25%']
 
-duty_cycle_palette = sns.color_palette("pastel", n_colors=len(duty_cycle_order))
+# Define a new palette using specific colors from seaborn's "muted" set
+base_palette = sns.color_palette("pastel")
+duty_cycle_palette = [
+    base_palette[6],
+    base_palette[8],
+    base_palette[9]
+]
 
 for i, (metric_col, metric_name) in enumerate(metrics_to_plot.items()):
     for j, model_name in enumerate(models_to_plot):

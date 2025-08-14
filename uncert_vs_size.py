@@ -101,7 +101,7 @@ def plot_single_panel(ax, agg_data, inset_data, metric, y_label, title, color_ma
     ax.grid(True, linestyle='--', alpha=0.6)
 
     # --- 2. Create and draw the inset violin plot ---
-    inset_pos = [0.38, 0.42, 0.5, 0.48] if metric == 'ause' else [0.41, 0.19, 0.5, 0.48]
+    inset_pos = [0.43, 0.42, 0.5, 0.48] if metric == 'ause' else [0.43, 0.19, 0.5, 0.48]
     ax_inset = ax.inset_axes(inset_pos)
     
     inset_hue_order = plot_data_inset.set_index('base_model').loc[model_families]['display_label'].unique()
@@ -124,6 +124,9 @@ def plot_single_panel(ax, agg_data, inset_data, metric, y_label, title, color_ma
     ax_inset.set_xlabel('')
     ax_inset.set_ylabel(y_label, fontsize=14)
     ax_inset.tick_params(axis='x', rotation=20, labelsize=12)
+    # Set horizontal alignment for each x-axis tick label
+    for label in ax_inset.get_xticklabels():
+        label.set_horizontalalignment('right')
     ax_inset.grid(True, linestyle='--', alpha=0.5)
     
     current_inset_xlim = ax_inset.get_xlim()
@@ -162,7 +165,10 @@ else:
 
 # --- Define consistent coloring and model order ---
 all_models = pd.concat([hf_agg_data['base_model'], ff_agg_data['base_model']]).unique()
-model_families = sorted([m for m in all_models if m != 'FDK'])
+
+# Replace the 'sorted' line with your custom order
+model_families = ['Ensemble', 'MC Dropout', 'BBB', 'Evidential', 'Auxiliary']
+
 palette = sns.color_palette("pastel", n_colors=len(model_families))
 color_map = {model: color for model, color in zip(model_families, palette)}
 

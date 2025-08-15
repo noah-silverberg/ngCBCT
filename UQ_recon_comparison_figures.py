@@ -61,12 +61,12 @@ TUMOR_LOC_PATHS = {
 # TODO: Please replace these placeholder values with the actual data.
 SCAN_TIMES = {
     # (scan_type, pid, sid): {"gated": "X min", "nonstop": "Y min"}
-    ("FF", "26", "01"): {"gated": "???? min", "nonstop": "0.56 min"},
-    ("FF", "28", "03"): {"gated": "???? min", "nonstop": "0.56 min"},
-    ("FF", "29", "01"): {"gated": "???? min", "nonstop": "0.56 min"},
-    ("HF", "25", "03"): {"gated": "???? min", "nonstop": "1 min"},
-    ("HF", "27", "01"): {"gated": "???? min", "nonstop": "1 min"},
-    ("HF", "29", "01"): {"gated": "???? min", "nonstop": "1 min"},
+    ("FF", "26", "01"): {"gated": "1.8 min", "nonstop": "0.56 min"},
+    ("FF", "28", "03"): {"gated": "1.6 min", "nonstop": "0.56 min"},
+    ("FF", "29", "01"): {"gated": "2.6 min", "nonstop": "0.56 min"},
+    ("HF", "25", "03"): {"gated": "3.5 min", "nonstop": "1 min"},
+    ("HF", "27", "01"): {"gated": "5.2 min", "nonstop": "1 min"},
+    ("HF", "29", "01"): {"gated": "4.1 min", "nonstop": "1 min"},
 }
 
 # --- Method & Data Loader Definitions ---

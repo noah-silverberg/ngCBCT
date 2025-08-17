@@ -183,14 +183,14 @@ class Files:
 
     Methods:
         get_projection_mat_filepath(patient, scan, scan_type, pancreas): Get the absolute file path for the projection `.mat` file.
-        get_projection_pt_filepath(patient, scan, scan_type): Get the absolute file path for the projection `.pt` file.
+        get_projection_pt_filepath(patient, scan, scan_type, gated, odd): Get the absolute file path for the projection `.pt` file.
         get_projections_aggregate_filepath(split, gated): Get the absolute file path for the aggregated projections `.npy` file.
         get_model_filepath(model_version, domain, checkpoint, ensure_exists): Get the absolute file path for the trained model file.
-        get_projections_results_filepath(model_version, patient, scan, scan_type, gated, ensure_exists): Get the absolute file path for the projection results `.mat` file.
-        get_recon_filepath(model_version, patient, scan, scan_type, gated, ensure_exists): Get the absolute file path for the FDK reconstruction `.pt` file.
+        get_projections_results_filepath(model_version, patient, scan, scan_type, gated, odd, ensure_exists): Get the absolute file path for the projection results `.mat` file.
+        get_recon_filepath(self, model_version, patient, scan, scan_type, gated, odd, passthrough_num, ensure_exists): Get the absolute file path for the FDK reconstruction `.pt` file.
         get_images_aggregate_filepath(model_version, split, gated, ensure_exists): Get the absolute file path for the aggregated images `.npy` file.
-        get_images_results_filepath(model_version, patient, scan, ensure_exists): Get the absolute file path for the image results `.pt` file.
-        get_error_results_filepath(model_version, patient, scan, ensure_exists): Get the absolute file path for the error prediction results `.pt` file.
+        get_images_results_filepath(model_version, patient, scan, odd, ensure_exists): Get the absolute file path for the image results `.pt` file.
+        get_error_results_filepath(model_version, patient, scan, odd, ensure_exists): Get the absolute file path for the error prediction results `.pt` file.
     """
     def __init__(self, directories: Directories):
         self.directories = directories
@@ -232,7 +232,7 @@ class Files:
         return os.path.join(self.directories.mat_projections_dir, filename)
 
     @staticmethod
-    def _get_projection_pt_filename(patient, scan, scan_type, gated):
+    def _get_projection_pt_filename(patient, scan, scan_type, gated, odd=None):
         """
         Get the filename for the projection `.pt` file based on patient, scan, and scan type.
 
@@ -241,13 +241,22 @@ class Files:
             scan (str): Scan identifier, e.g. '01'.
             scan_type (str): Type of scan, e.g. 'HF', 'FF'.
             gated (bool): Whether the data is gated or nonstop-gated.
+            odd (bool, optional): Whether the data is even or odd indexed.
         Returns:
             str: Filename for the projection `.pt` file.
         """
-        gated_str = "gated" if gated else "ng"
-        return f"{gated_str}_{scan_type}_p{patient}_{scan}.pt" # e.g., gated_HF_p01_01.pt
+        if gated:
+            return f"gated_{scan_type}_p{patient}_{scan}.pt" # e.g., gated_HF_p01_01.pt
+        else:
+            if odd is None:
+                raise ValueError("odd must be specified for nonstop-gated data.")
+            
+            if odd:
+                return f"ng_{scan_type}_p{patient}_{scan}.pt" # e.g., ng_HF_p01_01.pt
+            else:
+                return f"ng_{scan_type}_p{patient}_{scan}_even.pt" # e.g., ng_HF_p01_01_even.pt
 
-    def get_projection_pt_filepath(self, patient, scan, scan_type, gated):
+    def get_projection_pt_filepath(self, patient, scan, scan_type, gated, odd=None):
         """
         Get the absolute file path for the projection `.pt` file.
 
@@ -256,10 +265,11 @@ class Files:
             scan (str): Scan identifier, e.g. '01'.
             scan_type (str): Type of scan, e.g. 'HF', 'FF'.
             gated (bool): Whether the data is gated or nonstop-gated.
+            odd (bool, optional): Whether the data is even or odd indexed.
         Returns:
             str: Absolute file path for the projection `.pt` file.
         """
-        filename = self._get_projection_pt_filename(patient, scan, scan_type, gated)
+        filename = self._get_projection_pt_filename(patient, scan, scan_type, gated, odd)
         return os.path.join(self.directories.pt_projections_dir, filename)
     
     @staticmethod
@@ -331,7 +341,6 @@ class Files:
             swag_weight_decay = float(swag_weight_decay_part.split('_')[0])
 
         return checkpoint, swag_lr, swag_momentum, swag_weight_decay
-
     
     @staticmethod
     def _get_model_filename(model_version, checkpoint=None, swag_lr=None, swag_momentum=None, swag_weight_decay=None):
@@ -387,8 +396,6 @@ class Files:
         dir_ = self.directories.get_model_dir(model_version, domain, ensure_exists)
         return os.path.join(dir_, filename)
     
-
-    
     @staticmethod
     def _get_train_loss_filename():
         """
@@ -442,7 +449,7 @@ class Files:
         return os.path.join(dir_, filename)
 
     @staticmethod
-    def _get_projections_results_filename(patient, scan, gated, scan_type):
+    def _get_projections_results_filename(patient, scan, gated, scan_type, odd=None):
         """
         Get the filename for the projection results `.mat` file based on patient and scan.
 
@@ -451,6 +458,7 @@ class Files:
             scan (str): Scan identifier, e.g. '01'.
             gated (bool): Whether the projections are gated or not.
             scan_type (str): Type of scan, either 'HF', 'FF'.
+            odd (bool, optional): Whether the data is even or odd indexed.
 
         Returns:
             str: Filename for the projection results `.mat` file.
@@ -458,9 +466,15 @@ class Files:
         if gated:
             return f"{scan_type}_p{patient}_{scan}.mat" # e.g., p01_01.mat
         
-        return f"p{patient}_{scan}.mat" # e.g., p01_01.mat
+        if odd is None:
+            raise ValueError("odd must be specified for nonstop-gated data.")
+        
+        if odd:
+            return f"p{patient}_{scan}.mat" # e.g., p01_01.mat
+        else:
+            return f"p{patient}_{scan}_even.mat"
 
-    def get_projections_results_filepath(self, model_version, patient, scan, scan_type, gated, passthrough_num=None, ensure_exists=True):
+    def get_projections_results_filepath(self, model_version, patient, scan, scan_type, gated, odd=None, passthrough_num=None, ensure_exists=True):
         """
         Get the absolute file path for the projection results `.mat` file.
 
@@ -476,7 +490,7 @@ class Files:
         Returns:
             str: Absolute file path for the projection results `.mat` file.
         """
-        filename = self._get_projections_results_filename(patient, scan, gated, scan_type)
+        filename = self._get_projections_results_filename(patient, scan, gated, scan_type, odd)
         
         if gated:
             dir_ = self.directories.projections_gated_dir
@@ -486,7 +500,7 @@ class Files:
         return os.path.join(dir_, filename)
     
     @staticmethod
-    def _get_recon_filename(patient, scan, gated, scan_type):
+    def _get_recon_filename(patient, scan, gated, scan_type, odd=None):
         """
         Get the filename for the FDK reconstruction `.pt` file based on patient and scan.
 
@@ -495,16 +509,22 @@ class Files:
             scan (str): Scan identifier, e.g. '01'.
             gated (bool): Whether the reconstruction is gated or not.
             scan_type (str): Type of scan, either 'HF', 'FF'.
-
+            odd (bool, optional): Whether the data is even or odd indexed.
         Returns:
             str: Filename for the FDK reconstruction `.pt` file.
         """
         if gated:
             return f"{scan_type}_p{patient}_{scan}_gated.pt"
         
-        return f"p{patient}_{scan}.pt" # e.g., p01_01.pt
+        if odd is None:
+            raise ValueError("odd must be specified for nonstop-gated data.")
+        
+        if odd:
+            return f"p{patient}_{scan}.pt" # e.g., p01_01.pt
+        else:
+            return f"p{patient}_{scan}_even.pt"
 
-    def get_recon_filepath(self, model_version, patient, scan, scan_type, gated, passthrough_num=None, ensure_exists=True):
+    def get_recon_filepath(self, model_version, patient, scan, scan_type, gated, odd=None, passthrough_num=None, ensure_exists=True):
         """
         Get the absolute file path for the FDK reconstruction `.pt` file.
 
@@ -514,13 +534,14 @@ class Files:
             scan (str): Scan identifier, e.g. '01'.
             scan_type (str): Type of scan, either 'HF', 'FF'.
             gated (bool): Whether the reconstruction is gated or not.
+            odd (bool, optional): Whether the data is even or odd indexed.
             passthrough_num (int, optional): The passthrough number (leave as None for deterministic).
             ensure_exists (bool, optional): Whether to ensure the directory exists.
 
         Returns:
             str: Absolute file path for the FDK reconstruction `.pt` file.
         """
-        filename = self._get_recon_filename(patient, scan, gated, scan_type)
+        filename = self._get_recon_filename(patient, scan, gated, scan_type, odd)
 
         if gated:
             dir_ = self.directories.reconstructions_gated_dir
@@ -582,20 +603,27 @@ class Files:
         return os.path.join(dir_, filename)
 
     @staticmethod
-    def _get_images_results_filename(patient, scan):
+    def _get_images_results_filename(patient, scan, odd=None):
         """
         Get the filename for the image results `.pt` file based on patient and scan.
 
         Args:
             patient (str): Patient identifier, e.g. '01'.
             scan (str): Scan identifier, e.g. '01'.
+            odd (bool, optional): Whether the data is even or odd indexed.
 
         Returns:
             str: Filename for the image results `.pt` file.
         """
-        return f"p{patient}_{scan}.pt" # e.g., p01_01.pt
+        if odd is None:
+            raise ValueError("odd must be specified for nonstop-gated data.")
+        
+        if odd:
+            return f"p{patient}_{scan}.pt" # e.g., p01_01.pt
+        else:
+            return f"p{patient}_{scan}_even.pt"
     
-    def get_images_results_filepath(self, model_version, patient, scan, passthrough_num=None, ensure_exists=True):
+    def get_images_results_filepath(self, model_version, patient, scan, odd=None, passthrough_num=None, ensure_exists=True):
         """
         Get the absolute file path for the image results `.pt` file.
 
@@ -603,63 +631,39 @@ class Files:
             model_version (str): Model version identifier, e.g. 'v1', 'v2'.
             patient (str): Patient identifier, e.g. '01'.
             scan (str): Scan identifier, e.g. '01'.
+            odd (bool, optional): Whether the data is even or odd indexed.
             passthrough_num (int, optional): The passthrough number (leave as None for deterministic).
             ensure_exists (bool, optional): Whether to ensure the directory exists.
 
         Returns:
             str: Absolute file path for the image results `.pt` file.
         """
-        filename = self._get_images_results_filename(patient, scan)
+        filename = self._get_images_results_filename(patient, scan, odd)
         dir_ = self.directories.get_images_results_dir(model_version, passthrough_num, ensure_exists)
         return os.path.join(dir_, filename)
 
     @staticmethod
-    def _get_error_map_filename(patient, scan):
-        """
-        Get the filename for the absolute error map results `.pt` file based on patient and scan.
-
-        Args:
-            patient (str): Patient identifier, e.g. '01'.
-            scan (str): Scan identifier, e.g. '01'.
-
-        Returns:
-            str: Filename for the absolute error map results `.pt` file.
-        """
-        return f"p{patient}_{scan}_error.pt"
-
-    def get_error_map_filepath(self, model_version, patient, scan, passthrough_num=None, ensure_exists=True):
-        """
-        Get the absolute file path for the absolute error map results `.pt` file.
-
-        Args:
-            model_version (str): Model version identifier, e.g. 'v1', 'v2'.
-            patient (str): Patient identifier, e.g. '01'.
-            scan (str): Scan identifier, e.g. '01'.
-            passthrough_num (int, optional): The passthrough number (leave as None for deterministic).
-            ensure_exists (bool, optional): Whether to ensure the directory exists.
-
-        Returns:
-            str: Absolute file path for the absolute error map results `.pt` file.
-        """
-        filename = self._get_error_map_filename(patient, scan)
-        dir_ = self.directories.get_error_map_dir(model_version, passthrough_num, ensure_exists)
-        return os.path.join(dir_, filename)
-    
-    @staticmethod
-    def _get_error_results_filename(patient, scan):
+    def _get_error_results_filename(patient, scan, odd=None):
         """
         Get the filename for the error prediction results `.pt` file based on patient and scan.
 
         Args:
             patient (str): Patient identifier, e.g. '01'.
             scan (str): Scan identifier, e.g. '01'.
+            odd (bool, optional): Whether the data is even or odd indexed.
 
         Returns:
             str: Filename for the error prediction results `.pt` file.
         """
-        return f"p{patient}_{scan}_error.pt"
-    
-    def get_error_results_filepath(self, model_version, patient, scan, passthrough_num=None, ensure_exists=True):
+        if odd is None:
+            raise ValueError("odd must be specified for nonstop-gated data.")
+        
+        if odd:
+            return f"p{patient}_{scan}_error.pt"
+        else:
+            return f"p{patient}_{scan}_error_even.pt"
+
+    def get_error_results_filepath(self, model_version, patient, scan, odd=None, passthrough_num=None, ensure_exists=True):
         """
         Get the absolute file path for the error prediction results `.pt` file.
 
@@ -667,12 +671,13 @@ class Files:
             model_version (str): Model version identifier, e.g. 'v1', 'v2'.
             patient (str): Patient identifier, e.g. '01'.
             scan (str): Scan identifier, e.g. '01'.
+            odd (bool, optional): Whether the data is even or odd indexed.
             passthrough_num (int, optional): The passthrough number (leave as None for deterministic).
             ensure_exists (bool, optional): Whether to ensure the directory exists.
 
         Returns:
             str: Absolute file path for the error prediction results `.pt` file.
         """
-        filename = self._get_error_results_filename(patient, scan)
+        filename = self._get_error_results_filename(patient, scan, odd)
         dir_ = self.directories.get_error_results_dir(model_version, passthrough_num, ensure_exists)
         return os.path.join(dir_, filename)

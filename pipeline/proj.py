@@ -102,7 +102,7 @@ def undersample_projections(prj_gcbct: torch.Tensor, odd_index: np.ndarray):
     return prj_ngcbct, ngcbct_idx
 
 
-def interpolate_projections(prj_gcbct: torch.Tensor, odd_index: np.ndarray):
+def interpolate_projections(prj_gcbct: torch.Tensor, odd_index: np.ndarray, odd: bool):
     """
     Simulate nonstop-gated scan.
     Zero out missing angles in sinogram and linearly interpolate them.
@@ -110,6 +110,7 @@ def interpolate_projections(prj_gcbct: torch.Tensor, odd_index: np.ndarray):
     Args:
         prj_gcbct (torch.Tensor): shape (A, H, W), gated sinogram.
         odd_index (np.ndarray): shape (K,), 1-based indices of acquired angles.
+        odd (bool): If True, use odd indices for interpolate. If False, use even indices.
 
     Returns:
         prj_ngcbct_li (torch.Tensor): shape (A, H, W), nonstop-gated sinogram with missing angles interpolated.
@@ -119,6 +120,25 @@ def interpolate_projections(prj_gcbct: torch.Tensor, odd_index: np.ndarray):
     #       but this is not a bottleneck in the pipeline so we don't worry about it
 
     num_angles = prj_gcbct.shape[0]
+
+    if not odd:
+        # Set even_index to all the angles that are not in odd_index
+        even_index = np.setdiff1d(np.arange(1, num_angles + 1), odd_index, assume_unique=True)
+
+        # Now, we know that the first chunk is NOT acquired (since it IS acquired if we use odd incdices)
+        # so we can just rotate the angles until we have the first angle acquired
+        # and then interpolate
+        # and then rotate back at the end
+
+        # First we need to figure out the first angle that is acquired
+        first_acquired = even_index[0]
+
+        # Now we need to rotate the angles so that the first acquired angle is at index 0
+        prj_gcbct = torch.roll(prj_gcbct, -first_acquired + 1, dims=0)
+
+        # Now we need to update the odd_index to reflect the rotation
+        odd_index = even_index - first_acquired + 1
+        odd_index[odd_index <= 0] += num_angles
 
     # Initialize a new tensor for nonstop-gated, and fill it with the acquired angles
     prj_ngcbct, ngcbct_idx = undersample_projections(prj_gcbct, odd_index)
@@ -186,9 +206,13 @@ def interpolate_projections(prj_gcbct: torch.Tensor, odd_index: np.ndarray):
 
     # Now we have fully interpolated the nonstop-gated missing angles
     # We just reshape to [angles, H, W]
-    prj_ngcbct_li = tmp.permute(1, 0, 2).clone()
+    prj_ngcbct_li = tmp.permute(1, 0, 2)
 
-    return prj_ngcbct_li
+    if not odd:
+        # If we rotated the angles at the start, we need to rotate back
+        prj_ngcbct_li = torch.roll(prj_ngcbct_li, first_acquired - 1, dims=0)
+
+    return prj_ngcbct_li.clone()
 
 
 def pad_and_reshape(prj: torch.Tensor):

@@ -101,6 +101,19 @@ def undersample_projections(prj_gcbct: torch.Tensor, odd_index: np.ndarray):
     prj_ngcbct[ngcbct_idx] = prj_gcbct[ngcbct_idx]
     return prj_ngcbct, ngcbct_idx
 
+def get_even_index(odd_index: np.ndarray, num_angles: int = None):
+    """
+    Get even indices from odd indices.
+
+    Args:
+        odd_index (np.ndarray): shape (K,), 1-based indices of acquired angles.
+
+    Returns:
+        np.ndarray: shape (K,), 1-based indices of even angles.
+    """
+    # Set even_index to all the angles that are not in odd_index
+    even_index = np.setdiff1d(np.arange(1, num_angles + 1), odd_index, assume_unique=True)
+    return even_index
 
 def interpolate_projections(prj_gcbct: torch.Tensor, odd_index: np.ndarray, odd: bool):
     """
@@ -122,8 +135,7 @@ def interpolate_projections(prj_gcbct: torch.Tensor, odd_index: np.ndarray, odd:
     num_angles = prj_gcbct.shape[0]
 
     if not odd:
-        # Set even_index to all the angles that are not in odd_index
-        even_index = np.setdiff1d(np.arange(1, num_angles + 1), odd_index, assume_unique=True)
+        even_index = get_even_index(odd_index, num_angles)
 
         # Now, we know that the first chunk is NOT acquired (since it IS acquired if we use odd incdices)
         # so we can just rotate the angles until we have the first angle acquired

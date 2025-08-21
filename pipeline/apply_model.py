@@ -3,7 +3,7 @@ import torch
 from pipeline import network_instance
 import logging
 from pipeline.dsets import normalizeInputsClip
-from pipeline.proj import divide_sinogram
+from pipeline.proj import divide_sinogram, get_even_index
 from typing import Union
 
 logger = logging.getLogger("pipeline")
@@ -34,6 +34,7 @@ def apply_model_to_projections(
     angles: np.ndarray,
     prj_gcbct: torch.Tensor,
     prj_ngcbct_li: torch.Tensor,
+    odd: bool,
     device: torch.device,
     train_at_inference: bool = False,  # for MC dropout
     _batch_size: int = 4, # Number of slices (on each half of the scan) to process at once
@@ -45,6 +46,9 @@ def apply_model_to_projections(
         logger.info("Running model in train mode for MC dropout.")
     else:
         model.eval()
+
+    if not odd:
+        odd_index = get_even_index(odd_index, prj_gcbct.shape[1])
 
     # Flip angles if necessary
     angles = torch.from_numpy(np.array(sorted(angles))).float()

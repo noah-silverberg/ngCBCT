@@ -125,11 +125,11 @@ def load_gated_cbct(scan_type: str, pid: str, sid: str) -> np.ndarray:
 
 def load_fdk(scan_type: str, pid: str, sid: str) -> np.ndarray:
     if scan_type == 'HF':
-        path = HF_FILES.get_recon_filepath('raw', pid, sid, 'HF', gated=False)
+        path = HF_FILES.get_recon_filepath('raw', pid, sid, 'HF', gated=False, odd=True)
         recon = torch.load(path, map_location='cpu')
         recon = recon[20:-20].clone()
     else:
-        path = FF_FILES.get_recon_filepath('raw', pid, sid, 'FF', gated=False)
+        path = FF_FILES.get_recon_filepath('raw', pid, sid, 'FF', gated=False, odd=True)
         recon = torch.load(path, map_location='cpu')
         recon = recon[20:-20].clone()
         if recon.shape[-2:] == (512, 512):
@@ -141,10 +141,10 @@ def load_fdk(scan_type: str, pid: str, sid: str) -> np.ndarray:
 
 def load_ddcnn(scan_type: str, pid: str, sid: str) -> np.ndarray:
     if scan_type == 'HF':
-        path = HF_FILES.get_images_results_filepath('MK7_01', pid, sid)
+        path = HF_FILES.get_images_results_filepath('MK7_01', pid, sid, odd=True)
         recon = torch.load(path, map_location='cpu')
     else:
-        path = FF_FILES.get_images_results_filepath('MK7_01', pid, sid)
+        path = FF_FILES.get_images_results_filepath('MK7_01', pid, sid, odd=True)
         recon = torch.load(path, map_location='cpu')
         if recon.shape[-2:] == (512, 512):
             recon = recon[..., 128:-128, 128:-128].clone()
@@ -157,10 +157,10 @@ def load_ddcnn(scan_type: str, pid: str, sid: str) -> np.ndarray:
 
 def load_mcdropout(scan_type: str, pid: str, sid: str) -> np.ndarray:
     if scan_type == 'HF':
-        path = HF_FILES.get_images_results_filepath('MK7_MCDROPOUT_30_pct_NEW', pid, sid, passthrough_num=0)
+        path = HF_FILES.get_images_results_filepath('MK7_MCDROPOUT_30_pct_NEW', pid, sid, passthrough_num=0, odd=True)
         recon = torch.load(path, map_location='cpu')
     else:
-        path = FF_FILES.get_images_results_filepath('MK7_MCDROPOUT_15_pct', pid, sid, passthrough_num=0)
+        path = FF_FILES.get_images_results_filepath('MK7_MCDROPOUT_15_pct', pid, sid, passthrough_num=0, odd=True)
         recon = torch.load(path, map_location='cpu')
         if recon.shape[-2:] == (512, 512):
             recon = recon[..., 128:-128, 128:-128].clone()
@@ -172,10 +172,10 @@ def load_mcdropout(scan_type: str, pid: str, sid: str) -> np.ndarray:
 
 def load_bbb(scan_type: str, pid: str, sid: str) -> np.ndarray:
     if scan_type == 'HF':
-        path = HF_FILES.get_images_results_filepath('MK7_BBB_pi0.75_mu_0.0_sigma1_1e-1_sigma2_1e-3_beta_1e-2', pid, sid, passthrough_num=0)
+        path = HF_FILES.get_images_results_filepath('MK7_BBB_pi0.75_mu_0.0_sigma1_1e-1_sigma2_1e-3_beta_1e-2', pid, sid, passthrough_num=0, odd=True)
         recon = torch.load(path, map_location='cpu')
     else:
-        path = FF_FILES.get_images_results_filepath('MK7_BBB_pi0.5_mu_0.0_sigma1_1e-2_sigma2_3e-3_beta_1e-2', pid, sid, passthrough_num=0)
+        path = FF_FILES.get_images_results_filepath('MK7_BBB_pi0.5_mu_0.0_sigma1_1e-2_sigma2_3e-3_beta_1e-2', pid, sid, passthrough_num=0, odd=True)
         recon = torch.load(path, map_location='cpu')
         if recon.shape[-2:] == (512, 512):
             recon = recon[..., 128:-128, 128:-128].clone()
@@ -187,10 +187,10 @@ def load_bbb(scan_type: str, pid: str, sid: str) -> np.ndarray:
 
 def load_evidential(scan_type: str, pid: str, sid: str) -> np.ndarray:
     if scan_type == 'HF':
-        path = HF_FILES.get_images_results_filepath('MK7_EVIDENTIAL_nll1e0_reg1e-2_WUreg0_YEreg1e-2_NUreg1e-3_BETAreg1e-4_smooth1e0_ANNEAL', pid, sid)
+        path = HF_FILES.get_images_results_filepath('MK7_EVIDENTIAL_nll1e0_reg1e-2_WUreg0_YEreg1e-2_NUreg1e-3_BETAreg1e-4_smooth1e0_ANNEAL', pid, sid, odd=True)
         recon = torch.load(path, map_location='cpu')['gamma']
     else:
-        path = FF_FILES.get_images_results_filepath('MK7_EVIDENTIAL_nll1e0_reg1e-3_WUreg0_YEreg1e-2_NUreg3e-4_BETAreg1e-4_smooth1e0_ANNEAL', pid, sid)
+        path = FF_FILES.get_images_results_filepath('MK7_EVIDENTIAL_nll1e0_reg1e-3_WUreg0_YEreg1e-2_NUreg3e-4_BETAreg1e-4_smooth1e0_ANNEAL', pid, sid, odd=True)
         recon = torch.load(path, map_location='cpu')['gamma']
         if recon.shape[-2:] == (512, 512):
             recon = recon[..., 128:-128, 128:-128].clone()

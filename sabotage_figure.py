@@ -112,7 +112,7 @@ DATASETS = [
 LoaderFunc = Callable[[str, str, str, Files], np.ndarray]
 
 def load_fdk(scan_type: str, pid: str, sid: str, files_obj: Files) -> np.ndarray:
-    path = files_obj.get_recon_filepath('raw', pid, sid, scan_type, gated=False)
+    path = files_obj.get_recon_filepath('raw', pid, sid, scan_type, gated=False, odd=True)
     recon = torch.load(path, map_location='cpu')
     recon = recon[20:-20].clone()
     if scan_type == 'FF' and recon.shape[-2:] == (512, 512):
@@ -123,10 +123,10 @@ def load_fdk(scan_type: str, pid: str, sid: str, files_obj: Files) -> np.ndarray
 
 def load_ddcnn(scan_type: str, pid: str, sid: str, files_obj: Files) -> np.ndarray:
     if scan_type == 'HF':
-        path = files_obj.get_images_results_filepath('MK7_01', pid, sid)
+        path = files_obj.get_images_results_filepath('MK7_01', pid, sid, odd=True)
     else: # FF
-        path = files_obj.get_images_results_filepath('MK7_01', pid, sid)
-    
+        path = files_obj.get_images_results_filepath('MK7_01', pid, sid, odd=True)
+
     recon = torch.load(path, map_location='cpu')
     if scan_type == 'FF' and recon.shape[-2:] == (512, 512):
         recon = recon[..., 128:-128, 128:-128].clone()
@@ -139,9 +139,9 @@ def load_ddcnn(scan_type: str, pid: str, sid: str, files_obj: Files) -> np.ndarr
 
 def load_mcdropout(scan_type: str, pid: str, sid: str, files_obj: Files) -> np.ndarray:
     if scan_type == 'HF':
-        path = files_obj.get_images_results_filepath('MK7_MCDROPOUT_30_pct_NEW', pid, sid, passthrough_num=0)
+        path = files_obj.get_images_results_filepath('MK7_MCDROPOUT_30_pct_NEW', pid, sid, passthrough_num=0, odd=True)
     else: # FF
-        path = files_obj.get_images_results_filepath('MK7_MCDROPOUT_15_pct', pid, sid, passthrough_num=0)
+        path = files_obj.get_images_results_filepath('MK7_MCDROPOUT_15_pct', pid, sid, passthrough_num=0, odd=True)
 
     recon = torch.load(path, map_location='cpu')
     if scan_type == 'FF' and recon.shape[-2:] == (512, 512):
@@ -154,9 +154,9 @@ def load_mcdropout(scan_type: str, pid: str, sid: str, files_obj: Files) -> np.n
 
 def load_bbb(scan_type: str, pid: str, sid: str, files_obj: Files) -> np.ndarray:
     if scan_type == 'HF':
-        path = files_obj.get_images_results_filepath('MK7_BBB_pi0.75_mu_0.0_sigma1_1e-1_sigma2_1e-3_beta_1e-2', pid, sid, passthrough_num=0)
+        path = files_obj.get_images_results_filepath('MK7_BBB_pi0.75_mu_0.0_sigma1_1e-1_sigma2_1e-3_beta_1e-2', pid, sid, passthrough_num=0, odd=True)
     else: # FF
-        path = files_obj.get_images_results_filepath('MK7_BBB_pi0.5_mu_0.0_sigma1_1e-2_sigma2_3e-3_beta_1e-2', pid, sid, passthrough_num=0)
+        path = files_obj.get_images_results_filepath('MK7_BBB_pi0.5_mu_0.0_sigma1_1e-2_sigma2_3e-3_beta_1e-2', pid, sid, passthrough_num=0, odd=True)
 
     recon = torch.load(path, map_location='cpu')
     if scan_type == 'FF' and recon.shape[-2:] == (512, 512):
@@ -169,9 +169,9 @@ def load_bbb(scan_type: str, pid: str, sid: str, files_obj: Files) -> np.ndarray
 
 def load_evidential(scan_type: str, pid: str, sid: str, files_obj: Files) -> np.ndarray:
     if scan_type == 'HF':
-        path = files_obj.get_images_results_filepath('MK7_EVIDENTIAL_nll1e0_reg1e-2_WUreg0_YEreg1e-2_NUreg1e-3_BETAreg1e-4_smooth1e0_ANNEAL', pid, sid)
+        path = files_obj.get_images_results_filepath('MK7_EVIDENTIAL_nll1e0_reg1e-2_WUreg0_YEreg1e-2_NUreg1e-3_BETAreg1e-4_smooth1e0_ANNEAL', pid, sid, odd=True)
     else: # FF
-        path = files_obj.get_images_results_filepath('MK7_EVIDENTIAL_nll1e0_reg1e-3_WUreg0_YEreg1e-2_NUreg3e-4_BETAreg1e-4_smooth1e0_ANNEAL', pid, sid)
+        path = files_obj.get_images_results_filepath('MK7_EVIDENTIAL_nll1e0_reg1e-3_WUreg0_YEreg1e-2_NUreg3e-4_BETAreg1e-4_smooth1e0_ANNEAL', pid, sid, odd=True)
 
     recon = torch.load(path, map_location='cpu')['gamma']
     if scan_type == 'FF' and recon.shape[-2:] == (512, 512):

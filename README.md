@@ -1,6 +1,6 @@
 # Nonstop-Gated CBCT Project
 
-*(Last Updated 8/15/2025)*
+*(Last Updated 8/22/2025)*
 
 Code written by Noah Silverberg, based on initial version provided by Mitchell Yu. Feel free to contact me at noah.silverberg@yale.edu if you have any questions or encounter any issues. Or nsilverberg123@gmail.com if I've graduated...
 

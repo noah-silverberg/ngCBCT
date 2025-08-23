@@ -1,6 +1,6 @@
 # Nonstop-Gated CBCT Project
 
-*(Last Updated 8/22/2025)*
+*(Last Updated 8/23/2025)*
 
 Code written by Noah Silverberg, based on initial version provided by Mitchell Yu. Feel free to contact me at noah.silverberg@yale.edu if you have any questions or encounter any issues. Or nsilverberg123@gmail.com if I've graduated...
 
@@ -18,6 +18,8 @@ In particular, the following files exist within the ``pipeline`` folder:
 * ``proj.py``: Includes functionality related to pre-processing projections, including simulating nonstop-gated sinograms.
 * ``train_appy_MK6_numpy.py``: Includes training application, which is used for training various model architectures with various hyperparameters in both domains.
 * ``utils.py``: Miscellaneous utility functions.
+
+Then there's a bunch of other scripts/notebooks that are described later in this README. But the pipeline is the main workhorse.
 
 ## Requirements
 
@@ -79,6 +81,7 @@ There are some easy-to-use scripts for generating figures. Some of these are for
 * ``uncert_vs_size.py`` generates line plots showing how the AUSE and Spearman correlations for the uncertainties evolve as we increase the number of samples taken from our UQ methods. It also includes violin plots in insets. You'll need the ``results`` table saved as a ``.csv`` from the ``compare.ipynb`` notebook for this.
 * ``sabotage_figure.py`` generates a figure that displays the reconstructions from each model (vs. FDK) as we modify the duty-cycle.
 * ``ddcnn_paper_figures.py`` generates a figure that displays the reconstructions from each model (vs. gated and FDK).
+* ``compare.ipynb`` there are a bunch of diagnostic figures made during the analysis done in this notebook, which are NOT paper quality. However, the uncertainty/error map comparison figures are also buried in this notebook (since there is a lot of code overlap).  So look through this notebook for the figure generation blocks to do that -- note that you DO NOT need to run the whole analysis loop to actually use this (you can just run the config and function definitions, then skip to the figure generation).
 
 ## File Structure
 

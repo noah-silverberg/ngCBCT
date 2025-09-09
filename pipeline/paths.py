@@ -212,7 +212,7 @@ class Files:
             if scan_type == "HF":
                 return f"panc{patient}.{scan_type}{scan}.mat" # e.g., panc01.HF01.mat
             else:
-                return f"panc{patient}.{scan_type}{scan}.{scan_type}.mat" # e.g., panc01.FF01.FF.mat
+                return f"panc{int(patient)}.{scan_type}{scan}.{scan_type}.mat" # e.g., panc01.FF01.FF.mat
         else:
             return f"p{patient}.{scan_type}{scan}.{scan_type}.mat" # e.g., p01.HF01.HF.mat
 

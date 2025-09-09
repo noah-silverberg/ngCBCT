@@ -16,20 +16,27 @@ def aggregate_saved_projections(paths: list[str], out_path: str):
     Args:
         paths (list[str]): List of file paths to the projection tensors.
     """
-    # Concatenate all scans into one tensor
-    # along the H dimension (i.e., the dimension where we already stacked them before saving -- see "divide_sinogram" in proj.py)
-    for i, path in tqdm(enumerate(paths), desc="Aggregating projections"):
+    # First pass: Get all shapes to determine the final size.
+    # This is necessary because the first dimension of each tensor can be different.
+    shapes = [torch.load(p).shape for p in tqdm(paths, desc="Pass 1/2: Reading shapes")]
+    
+    # Calculate the total size for the first dimension.
+    total_dim0 = sum(s[0] for s in shapes)
+    # We assume all other dimensions are consistent, so we take them from the first tensor.
+    final_shape = (total_dim0, *shapes[0][1:])
+
+    # Allocate the memory-mapped file with the final, correct shape.
+    prj_agg = open_memmap(out_path, dtype=np.float32, mode="w+", shape=final_shape)
+    logger.debug(f"Created memory-mapped file at {out_path} with shape {final_shape}")
+
+    # Second pass: Load data again and fill the array.
+    current_pos = 0
+    for i, path in tqdm(enumerate(paths), desc="Pass 2/2: Aggregating projections"):
         prj = torch.load(path).detach()
-
-        if i == 0:
-            # Allocate an empty tensor for the aggregated projections
-            # We assume all projections have the same shape
-            final_shape = (len(paths) * prj.shape[0], prj.shape[1], prj.shape[2], prj.shape[3])
-            prj_agg = open_memmap(out_path, dtype=np.float32, mode="w+", shape=final_shape)
-            logger.debug(f"Created memory-mapped file at {out_path} with shape {final_shape}")
-
-        # Fill the allocated tensor with the loaded projections
-        prj_agg[i * prj.shape[0] : (i + 1) * prj.shape[0], ...] = prj.cpu().numpy()
+        # Fill the allocated tensor using a running index and the pre-calculated shape.
+        rows_to_add = shapes[i][0]
+        prj_agg[current_pos : current_pos + rows_to_add, ...] = prj.cpu().numpy()
+        current_pos += rows_to_add
 
         del prj
         

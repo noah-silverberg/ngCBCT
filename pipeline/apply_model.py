@@ -5,6 +5,7 @@ import logging
 from pipeline.dsets import normalizeInputsClip
 from pipeline.proj import divide_sinogram, get_even_index
 from typing import Union
+import scipy.io
 
 logger = logging.getLogger("pipeline")
 
@@ -254,7 +255,11 @@ def apply_model_to_recons(
     if isinstance(pt_path, str):
         # Load the nonstop-gated reconstruction
         # NOTE: These each have shape (160, 512, 512) for HF and shape (160, 256, 256) for FF
-        recon = torch.load(pt_path).detach().to(device)
+        if pt_path.endswith('.mat'):
+            recon = scipy.io.loadmat(pt_path)['u_PL' if scan_type == 'HF' else 'u_PL_ROI']
+            recon = torch.permute(torch.tensor(recon).float(), (2, 0, 1)).to(device)
+        else:
+            recon = torch.load(pt_path).detach().to(device)
         recon = normalizeInputsClip(recon, scan_type)
         recon = torch.unsqueeze(recon, 1)  # Add channel dimension
     elif isinstance(pt_path, list) and len(pt_path) == 3:
@@ -262,7 +267,11 @@ def apply_model_to_recons(
 
         # Load nontop-gated, PD output, and ID output
         nsg_recon = torch.load(pt_path[0]).detach().to(device)
-        pd_recon = torch.load(pt_path[1]).detach().to(device)
+        if pt_path[1].endswith('.mat'):
+            pd_recon = scipy.io.loadmat(pt_path[1])['u_PL' if scan_type == 'HF' else 'u_PL_ROI']
+            pd_recon = torch.permute(torch.tensor(pd_recon).float(), (2, 0, 1)).to(device)
+        else:
+            pd_recon = torch.load(pt_path[1]).detach().to(device)
         id_recon = torch.load(pt_path[2]).detach().to(device)
 
         nsg_recon = normalizeInputsClip(nsg_recon, scan_type)

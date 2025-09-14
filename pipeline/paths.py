@@ -20,6 +20,7 @@ class Directories:
         projections_gated_dir (str): Absolute path to the directory containing gated PD data files.
         reconstructions_dir (str): Absolute path to the directory containing FDK reconstruction files.
         reconstructions_gated_dir (str): Absolute path to the directory containing gated FDK reconstruction files.
+        pl_reconstructions_dir (str): Absolute path to the directory containing PL reconstruction files.
         images_aggregate_dir (str): Absolute path to the directory containing aggregated ID data files.
         images_model_dir (str): Absolute path to the directory containing ID model files.
         images_results_dir (str): Absolute path to the directory containing ID results files.
@@ -49,6 +50,7 @@ class Directories:
     projections_gated_dir: str = None
     reconstructions_dir: str = None
     reconstructions_gated_dir: str = None
+    pl_reconstructions_dir: str = None
     images_aggregate_dir: str = None
     images_model_dir: str = None
     images_results_dir: str = None
@@ -500,7 +502,7 @@ class Files:
         return os.path.join(dir_, filename)
     
     @staticmethod
-    def _get_recon_filename(patient, scan, gated, scan_type, odd=None):
+    def _get_recon_filename(patient, scan, gated, scan_type, odd=None, pl=False):
         """
         Get the filename for the FDK reconstruction `.pt` file based on patient and scan.
 
@@ -510,6 +512,7 @@ class Files:
             gated (bool): Whether the reconstruction is gated or not.
             scan_type (str): Type of scan, either 'HF', 'FF'.
             odd (bool, optional): Whether the data is even or odd indexed.
+            pl (bool, optional): Whether the reconstruction is a PL reconstruction.
         Returns:
             str: Filename for the FDK reconstruction `.pt` file.
         """
@@ -518,6 +521,15 @@ class Files:
         
         if odd is None:
             raise ValueError("odd must be specified for nonstop-gated data.")
+        
+        if pl:
+            fname = f"recon_panc{patient}.{scan_type}{scan}.u_PL"
+            if scan_type == "FF":
+                fname += "_ROI"
+            fname += ".b2.5"
+            if not odd:
+                fname += "_even"
+            return fname + ".mat"
         
         if odd:
             return f"p{patient}_{scan}.pt" # e.g., p01_01.pt
@@ -541,12 +553,15 @@ class Files:
         Returns:
             str: Absolute file path for the FDK reconstruction `.pt` file.
         """
-        filename = self._get_recon_filename(patient, scan, gated, scan_type, odd)
+        filename = self._get_recon_filename(patient, scan, gated, scan_type, odd, pl=(model_version=="pl"))
 
         if gated:
             dir_ = self.directories.reconstructions_gated_dir
         else:
-            dir_ = self.directories.get_reconstructions_dir(model_version, passthrough_num,ensure_exists)
+            if model_version == "pl":
+                dir_ = self.directories.pl_reconstructions_dir
+            else:
+                dir_ = self.directories.get_reconstructions_dir(model_version, passthrough_num, ensure_exists)
 
         return os.path.join(dir_, filename)
     

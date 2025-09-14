@@ -6,6 +6,7 @@ from pipeline.dsets import normalizeInputsClip
 import numpy as np
 from numpy.lib.format import open_memmap
 from typing import Union
+import scipy.io
 
 logger = logging.getLogger("pipeline")
 
@@ -47,7 +48,11 @@ def aggregate_saved_recons(paths: Union[list[str], list[list[str]]], out_path: s
             paths = [paths]
 
     # 1. Determine the shape of the final aggregated array without loading all data
-    first_recon = torch.load(paths[0][0]).detach().float()
+    if paths[0][0].endswith(".mat"):
+        first_recon = scipy.io.loadmat(paths[0][0])['u_PL' if scan_type == 'HF' else 'u_PL_ROI']
+        first_recon = torch.permute(torch.tensor(first_recon).float(), (2, 0, 1))
+    else:
+        first_recon = torch.load(paths[0][0]).detach().float()
     if first_recon.ndim == 3:
         first_recon = normalizeInputsClip(first_recon, scan_type)
         first_recon = torch.unsqueeze(first_recon, 1)
@@ -99,7 +104,11 @@ def aggregate_saved_recons(paths: Union[list[str], list[list[str]]], out_path: s
             del recon, gt, error
         else:
             for j, path in enumerate(paths_):
-                recon = torch.load(path).detach().float()
+                if path.endswith(".mat"):
+                    recon = scipy.io.loadmat(path)['u_PL' if scan_type == 'HF' else 'u_PL_ROI']
+                    recon = torch.permute(torch.tensor(recon).float(), (2, 0, 1))
+                else:
+                    recon = torch.load(path).detach().float()
                 if recon.shape[0] == 200:
                     recon = normalizeInputsClip(recon, scan_type)
                 if recon.ndim == 4:

@@ -2,8 +2,9 @@
 import os
 import matplotlib.pyplot as plt
 import torch
-import tigre
 import numpy as np
+import CTorch.utils.geometry as geometry
+from CTorch.reconstructor.fbpreconstructor import FBPReconstructor as FBP
 
 def read_scans_agg_file(path, list_=False):
     # Read the aggregation scans file and split into TRAIN/VALIDATION/TEST
@@ -49,161 +50,106 @@ def read_scans_agg_file(path, list_=False):
 def ensure_dir(path):
     """Create directory if not exists."""
     os.makedirs(path, exist_ok=True)
+    
+def get_geometry(prj, angles, scan_type):
+    if scan_type == "HF":
+        nView, nv, nu = prj.shape
+
+        du, dv = 0.776, 0.776  # detecor pixel size
+        detType = 'flat'
+        SAD, SDD = [1000.0], [1500.0]  # source-axis-distance, source-detector-distance
+
+        xOfst, yOfst, zOfst = [0.0], [0.0], [0.0]  # image center offset
+        xSrc, zSrc = [0.0], [0.0]
+
+        uOfst, vOfst = [-160.0], [0.0]  # detecor center offset for HF
+
+        nx, ny, nz = 512, 512, 200 # image dimension
+        dx, dy, dz = 1., 1., 1. # image voxel size
+
+        # # The following are exactly the same for all projection data once the geometry is fixed
+        padwidth = np.floor(2 * uOfst[0] / du)  # positive or negative value, but it's ok
+        z_uOfst = [0.0]  # initialize
+        z_uOfst[0] = uOfst[0] - padwidth/2 * du
+
+        z_nu = int(nu + abs(padwidth))
+        viewAngles = angles
+
+        # CircGeom3D for HF after zeropadding and preweighting
+        geom = geometry.CircGeom3D(
+            nx, ny, nz, dx, dy, dz, z_nu, nv, nView, viewAngles, du, dv, detType, SAD, SDD,
+            xOfst=xOfst, yOfst=yOfst, zOfst=zOfst, uOfst=z_uOfst, vOfst=vOfst,
+            xSrc=xSrc, zSrc=zSrc, fixed=True
+        )  # the only differences are z_nu and z_uOfst
+    else:
+        raise NotImplementedError("Only HF geometry has been implemented...")
+
+    return geom, (nView, nu, nv, du, uOfst, SDD)
+
+def pad_and_preweight(prj, nView, nu, nv, du, uOfst, SDD):
+    # # The following are exactly the same for all projection data once the geometry is fixed
+    padwidth = np.floor(2 * uOfst[0] / du)  # positive or negative value, but it's ok
+    z_uOfst = [0.0]  # initialize
+    z_uOfst[0] = uOfst[0] - padwidth/2 * du
+
+    z_nu = int(nu + abs(padwidth))
+    theta = (nu * du/2 - abs(uOfst[0])) * np.sign(uOfst[0])
+
+    us = (np.arange(-z_nu/2 + 0.5, z_nu/2, 1) * du + abs(z_uOfst[0]))  # [-xx, xx] 1D vector
+    abstheta = abs(theta)
+
+    # weight1D
+    weight1D = np.ones(z_nu, dtype=np.float32)
+
+    mask1 = np.abs(us) <= abstheta
+    weight1D[mask1] = 0.5 * (np.sin((np.pi/2) * np.arctan(us[mask1] / SDD[0]) / (np.arctan(abstheta/SDD[0]))) + 1)
+
+    mask2 = us < -abstheta
+    weight1D[mask2] = 0
 
 
-# def plot_loss(train_loss, val_loss, model_name, save_dir=None):
-#     """Plot and optionally save training and validation loss curves."""
-#     plt.figure()
-#     plt.plot(torch.tensor(train_loss).cpu().numpy(), "r", label="train_loss")
-#     plt.plot(torch.tensor(val_loss).cpu().numpy(), "g", label="val_loss")
-#     plt.title(model_name)
-#     plt.legend()
-#     if save_dir:
-#         ensure_dir(save_dir)
-#         plt.savefig(os.path.join(save_dir, f"{model_name}_loss.png"))
-#     plt.close()
+    # weight2D
+    weight2D = np.tile(weight1D, (nv, 1))  # repeat the weight1D
+
+    if theta < 0:  # equivalent to uOfst[0] < 0
+        weight2D = np.fliplr(weight2D)
+
+    z_prj = np.zeros((nView, nv, z_nu), dtype=prj.dtype)  # initialize with zeros
+    if uOfst[0] > 0:
+        z_prj[:, :, padwidth:] = prj  # pad zeros in front
+    else:
+        z_prj[:, :, :nu] = prj  # pad zeros after
 
 
-# def display_slices_grid(
-#     idata, axis, sstep=5, fcols=2, cmap=plt.cm.gray, clip_low=None, clip_high=None
-# ):
-#     """Display a grid sampling slices along specified axis (0,1,2)."""
-#     # idata: numpy or torch array with shape [D0, D1, D2]
-#     # axis: which axis to sample (0: rows, 1: cols, 2: indices)
-#     arr = idata
-#     # Determine shape
-#     shape = arr.shape
-#     # Determine range for sampling
-#     if axis == 0:
-#         max_idx = shape[0]
-#     elif axis == 1:
-#         max_idx = shape[1]
-#     elif axis == 2:
-#         max_idx = shape[2]
-#     else:
-#         raise ValueError("axis must be 0,1,2")
-#     indices = list(range(0, max_idx, sstep))
-#     frows = len(indices) // fcols + 1
-#     plt.figure(figsize=(10, frows * 3))
-#     for i, idx in enumerate(indices):
-#         sub = plt.subplot(frows, fcols, i + 1)
-#         sub.set_title(f"Axis {axis} slice {idx}")
-#         if axis == 0:
-#             img = arr[idx, :, :]
-#         elif axis == 1:
-#             img = arr[:, idx, :]
-#         else:
-#             img = arr[:, :, idx]
-#         sub.imshow(
-#             img.T if axis != 2 else img, cmap=cmap, vmin=clip_low, vmax=clip_high
-#         )
-#         sub.axis("off")
-#     plt.tight_layout()
+    # no need for looping around view
+    z_prj[:, :, :] = z_prj[:, :, :] * weight2D * 2
 
+    return z_prj
 
-# def plot_single_slices(
-#     idata,
-#     row=None,
-#     col=None,
-#     index=None,
-#     cmap=plt.cm.gray,
-#     clip_low=None,
-#     clip_high=None,
-#     save_prefix=None,
-#     save_dir=None,
-# ):
-#     """Plot single slices at given row, col, index. idata shape [D0,D1,D2]."""
-#     # row: slice along axis 0; col: axis1; index: axis2
-#     if save_dir:
-#         ensure_dir(save_dir)
-#     if row is not None:
-#         plt.figure()
-#         img = idata[row, :, :].T
-#         plt.imshow(img, cmap=cmap, vmin=clip_low, vmax=clip_high)
-#         plt.axis("off")
-#         if save_dir and save_prefix:
-#             plt.savefig(
-#                 os.path.join(save_dir, f"{save_prefix}_row{row}.png"),
-#                 bbox_inches="tight",
-#                 pad_inches=0,
-#             )
-#         plt.close()
-#     if col is not None:
-#         plt.figure()
-#         img = idata[:, col, :].T
-#         plt.imshow(img, cmap=cmap, vmin=clip_low, vmax=clip_high)
-#         plt.axis("off")
-#         if save_dir and save_prefix:
-#             plt.savefig(
-#                 os.path.join(save_dir, f"{save_prefix}_col{col}.png"),
-#                 bbox_inches="tight",
-#                 pad_inches=0,
-#             )
-#         plt.close()
-#     if index is not None:
-#         plt.figure()
-#         img = idata[:, :, index]
-#         plt.imshow(img, cmap=cmap, vmin=clip_low, vmax=clip_high)
-#         plt.axis("off")
-#         if save_dir and save_prefix:
-#             plt.savefig(
-#                 os.path.join(save_dir, f"{save_prefix}_index{index}.png"),
-#                 bbox_inches="tight",
-#                 pad_inches=0,
-#             )
-#         plt.close()
+def CTorchReconstruct(prj, angles, scan_type, device):
+    prj = torch.permute(prj, (2, 1, 0))
+    prj = torch.flip(prj, [1])
+    prj = prj.cpu().numpy()
 
-def get_geometry():
-    geo = tigre.geometry()
-    # VARIABLE                                   DESCRIPTION                    UNITS
-    # -------------------------------------------------------------------------------------
-    # Distances
-    geo.DSD = 1500  # Distance Source Detector      (mm)
-    geo.DSO = 1000  # Distance Source Origin        (mm)
-    # Detector parameters
-    PixelSize = 0.388  # in mm
-    rebin = 2  # we did 2x2 rebinning to make 0.776x0.776 detector bins
-    # number of pixels              (px)
-    # geo.nDetector = np.array(prj.shape[1], prj.shape[0])
-    geo.nDetector = np.array([382, 510])
-    # size of each pixel            (mm)
-    geo.dDetector = PixelSize * rebin * np.array([1, 1])
-    # total size of the detector    (mm)
-    geo.sDetector = geo.nDetector * geo.dDetector
-    # Image parameters
-    geo.nVoxel = np.array([200, 512, 512])  # number of voxels              (vx)
-    geo.dVoxel = np.array([1.0, 1.0, 1.0])  # size of each voxel            (mm)
-    geo.sVoxel = geo.nVoxel * geo.dVoxel  # total size of the image       (mm)
+    angles = angles - np.pi/2
 
-    # Offsets
-    geo.offOrigin = np.array([0, 0, 0])  # Offset of image from origin   (mm)
-    geo.offDetector = np.array([0, 160])  # Offset of Detector            (mm)
-    # These two can be also defined
-    # per angle
+    # Get geometry
+    geom, pad_preweight_args = get_geometry(prj, angles, scan_type)
 
-    # Auxiliary
-    geo.accuracy = 0.5  # Variable to define accuracy of
-    # 'interpolated' projection
-    # It defines the amoutn of
-    # samples per voxel.
-    # Recommended <=0.5             (vx/sample)
+    # Pad and preweight projections
+    prj_pad_preweight = pad_and_preweight(prj, *pad_preweight_args)
 
-    # Optional Parameters
-    # There is no need to define these unless you actually need them in your
-    # reconstruction
+    # Convert to tensor
+    prj_pad_preweight = torch.from_numpy(prj_pad_preweight).reshape(1, 1, *prj_pad_preweight.shape).float().to(device)
 
+    # Initialize FBP reconstructor
+    reconstructor = FBP(geom, "DD", window="hamming", cutoff=0.6) # reconstructed image is more blurred when cutoff is smaller
 
-    geo.COR = 0  # y direction displacement for
-    # centre of rotation
-    # correction                   (mm)
-    # This can also be defined per
-    # angle
+    # Reconstruct and remove extra dimensions
+    recon = reconstructor(prj_pad_preweight).cpu()
+    recon = torch.squeeze(recon, dim=1)
+    recon = torch.squeeze(recon, dim=0)
 
-    geo.rotDetector = np.array([0, 0, 0])  # Rotation of the detector, by
-    # X,Y and Z axis respectively. (rad)
-    # This can also be defined per
-    # angle
+    recon = torch.flip(recon, [1])
 
-    geo.mode = "cone"  # Or 'parallel'. Geometry type.
-
-    return geo
+    return recon

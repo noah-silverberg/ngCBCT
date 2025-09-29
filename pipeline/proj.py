@@ -52,6 +52,7 @@ def reformat_sinogram(prj: torch.Tensor, angles: torch.Tensor):
     Returns:
         prj (torch.Tensor): shape (A, H, W), flipped and permuted sinogram.
         angles1 (torch.Tensor): shape (A,), reformatted angles in radians.
+        flipped (bool): whether angles were flipped.
     """
     # Flips and permutations to match the expected format
     prj = prj.detach().clone()
@@ -59,12 +60,15 @@ def reformat_sinogram(prj: torch.Tensor, angles: torch.Tensor):
     prj = prj.permute(2, 1, 0)
     prj = torch.flip(prj, (2,))
 
+    flipped = False
+
     # Flips the angles if they are in the opposite order
     angles1 = -(angles + np.pi / 2)
     if (angles1[-1:] - angles1[0]) < 0:
         angles1 = torch.flip(angles1, (0,))
         prj = torch.flip(prj, (0,))
-    return prj, angles1
+        flipped = True
+    return prj, angles1, flipped
 
 
 def find_missing_indices(odd_index: np.ndarray):

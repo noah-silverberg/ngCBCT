@@ -127,11 +127,7 @@ def pad_and_preweight(prj, nView, nu, nv, du, uOfst, SDD):
     return z_prj
 
 def CTorchReconstruct(prj, angles, scan_type, device):
-    prj = torch.permute(prj, (2, 1, 0))
-    prj = torch.flip(prj, [1])
     prj = prj.cpu().numpy()
-
-    angles = angles - np.pi/2
 
     # Get geometry
     geom, pad_preweight_args = get_geometry(prj, angles, scan_type)

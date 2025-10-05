@@ -240,4 +240,6 @@ def CTorchReconstruct(prj, angles, scan_type, device):
 
         recon = mask_roi(recon, *roi_mask_args)
 
+        recon = torch.from_numpy(recon).float()
+
     return recon

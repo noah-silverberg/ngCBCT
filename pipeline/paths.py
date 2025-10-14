@@ -184,7 +184,7 @@ class Files:
         directories (Directories): An instance of the Directories class containing the directory paths.
 
     Methods:
-        get_projection_mat_filepath(patient, scan, scan_type, pancreas): Get the absolute file path for the projection `.mat` file.
+        get_projection_mat_filepath(patient, scan, scan_type, pancreas, liver): Get the absolute file path for the projection `.mat` file.
         get_projection_pt_filepath(patient, scan, scan_type, gated, odd): Get the absolute file path for the projection `.pt` file.
         get_projections_aggregate_filepath(split, gated): Get the absolute file path for the aggregated projections `.npy` file.
         get_model_filepath(model_version, domain, checkpoint, ensure_exists): Get the absolute file path for the trained model file.
@@ -198,27 +198,33 @@ class Files:
         self.directories = directories
 
     @staticmethod
-    def _get_projection_mat_filename(patient, scan, scan_type, pancreas):
+    def _get_projection_mat_filename(patient, scan, scan_type, pancreas, liver):
         """
-        Get the filename for the projection `.mat` file based on patient, scan, scan type, and whether it's a pancreas scan.
+        Get the filename for the projection `.mat` file based on patient, scan, scan type, and whether it's a pancreas/liver scan.
 
         Args:
             patient (str): Patient identifier, e.g. '01'.
             scan (str): Scan identifier, e.g. '01'.
             scan_type (str): Type of scan, e.g. 'HF', 'FF'.
             pancreas (bool): Whether the scan is for the pancreas.
+            liver (bool): Whether the scan is for the liver.
         Returns:
             str: Filename for the projection `.mat` file.
         """
+        if pancreas and liver:
+            raise ValueError("pancreas and liver cannot both be True.")
+
         if pancreas:
             if scan_type == "HF":
                 return f"panc{patient}.{scan_type}{scan}.mat" # e.g., panc01.HF01.mat
             else:
                 return f"panc{int(patient)}.{scan_type}{scan}.{scan_type}.mat" # e.g., panc01.FF01.FF.mat
+        elif liver:
+            return f"liver{patient}.{scan_type}{scan}.{scan_type}.mat" # e.g., liver00.HF01.HF.mat
         else:
             return f"p{patient}.{scan_type}{scan}.{scan_type}.mat" # e.g., p01.HF01.HF.mat
 
-    def get_projection_mat_filepath(self, patient, scan, scan_type, pancreas):
+    def get_projection_mat_filepath(self, patient, scan, scan_type, pancreas, liver):
         """
         Get the absolute file path for the projection `.mat` file.
 
@@ -227,11 +233,15 @@ class Files:
             scan (str): Scan identifier, e.g. '01'.
             scan_type (str): Type of scan, e.g. 'HF', 'FF'.
             pancreas (bool): Whether the scan is for the pancreas.
+            liver (bool): Whether the scan is for the liver.
         Returns:
             str: Absolute file path for the projection `.mat` file.
         """
-        filename = self._get_projection_mat_filename(patient, scan, scan_type, pancreas)
-        return os.path.join(self.directories.mat_projections_dir, filename)
+        filename = self._get_projection_mat_filename(patient, scan, scan_type, pancreas, liver)
+        if liver:
+            return os.path.join(self.directories.mat_projections_dir, scan_type, filename)
+        else:
+            return os.path.join(self.directories.mat_projections_dir, filename)
 
     @staticmethod
     def _get_projection_pt_filename(patient, scan, scan_type, gated, odd=None):

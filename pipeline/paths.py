@@ -1,7 +1,8 @@
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pipeline.utils import ensure_dir
 import logging
+from pipeline.utils import read_scans_agg_file
 
 logger = logging.getLogger("ngCBCT")
 
@@ -706,3 +707,43 @@ class Files:
         filename = self._get_error_results_filename(patient, scan, odd)
         dir_ = self.directories.get_error_results_dir(model_version, passthrough_num, ensure_exists)
         return os.path.join(dir_, filename)
+    
+@dataclass
+class Dataset:
+    """
+    Class to hold a `Files` instance along with its metadata.
+
+    Attributes:
+        files (Files): An instance of the Files class.
+        pancreas (bool): Whether the dataset is for pancreas scans.
+        liver (bool): Whether the dataset is for liver scans.
+        scans_convert_path (str): Path to the scans conversion file.
+        scans_agg_path (str): Path to the scans aggregation file.
+    """
+    files: Files
+    pancreas: bool
+    liver: bool
+    scans_convert_path: str = None
+    scans_agg_path: str = None
+
+    scans_to_agg: dict = field(default_factory=dict)
+    scans_to_convert: list = field(default_factory=list)
+    scan_type: str = None
+
+    def __post_init__(self):
+        if self.scans_convert_path is not None:
+            # Read the scans to convert file
+            with open(self.scans_convert_path, "r") as f:
+                self.scans_to_convert = []
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    patient, scan, scan_type = line.split()
+                    self.scans_to_convert.append((patient, scan, scan_type))
+            logger.info(f"Loaded scans conversion data from {self.scans_convert_path}.")
+
+        if self.scans_agg_path is not None:
+            # Load the scan list data
+            self.scans_to_agg, self.scan_type = read_scans_agg_file(self.scans_agg_path)
+            logger.info(f"Loaded scans aggregation data from {self.scans_agg_path} with scan type {self.scan_type}.")

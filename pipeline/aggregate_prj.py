@@ -39,7 +39,7 @@ def aggregate_saved_projections(paths: list[str], out_path: str):
         current_pos += rows_to_add
 
         del prj
-        
+        prj_agg.flush()  # Ensure all data is written to disk
 
     prj_agg.flush()  # Ensure all data is written to disk
     logger.debug(f"Aggregated {len(paths)} projections into shape: {prj_agg.shape}")
